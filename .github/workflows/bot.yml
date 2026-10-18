@@ -46,7 +46,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: docs/static
-          key: static-v2-${{ steps.date.outputs.day }}
+          key: static-v3-${{ steps.date.outputs.day }}
 
       - name: Run the NVDA bot once
         run: python bot.py --tick

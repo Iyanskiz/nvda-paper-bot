@@ -97,10 +97,8 @@ def sim_context(bars, symbol="NVDA"):
     for b in bars:
         by_day[datetime.fromtimestamp(b["t"], bot.ET).date().isoformat()] = b["c"]
     closes += sorted(by_day.items())
-    vals = [c for _, c in closes]
-    s200 = bot.sma(vals, 200)
-    above = {d: (m is not None and c > m) for (d, c), m in zip(closes, s200)}
-    return dict(bot.NO_CONTEXT, above=above, earnings=real.get("earnings"), s200=s200[-1])
+    flags, s50, s200 = bot.trend_flags([d for d, _ in closes], [c for _, c in closes])
+    return dict(bot.NO_CONTEXT, **flags, earnings=real.get("earnings"), s200=s200, s50=s50)
 
 
 def _daily_hist(symbol):
@@ -138,7 +136,7 @@ def run_live(bars, preset="smart", symbol="NVDA"):
         held.append(a["shares"] > 0)
         stops.append(round(a["stop"], 4) if a["shares"] > 0 and a["stop"] else None)
     p = bot.PRESETS[preset]
-    regime, earn = bot.context_series(bars, ctx)
+    regime, earn = bot.context_series(bars, ctx, p.get("regime_key", "above"))
     ind = bot.indicators(bars, p, regime, earn)
     r = lambda xs: [None if x is None else round(x, 4) for x in xs]
     return dict(symbol=symbol, interval="5m", preset=preset, start=start, params=p,
@@ -153,7 +151,7 @@ def fast_replay(bars, preset="smart", symbol="NVDA"):
     Used to pre-build the hosted dashboard."""
     ctx = sim_context(bars, symbol)
     p = bot.PRESETS[preset]
-    regime, earn = bot.context_series(bars, ctx)
+    regime, earn = bot.context_series(bars, ctx, p.get("regime_key", "above"))
     ind = bot.indicators(bars, p, regime, earn)
     acct = bot.new_account()
     start = WARMUP_DAYS * BARS_PER_DAY - 1
@@ -173,7 +171,7 @@ def fast_replay(bars, preset="smart", symbol="NVDA"):
 def fast_run(bars, preset="smart", symbol="NVDA"):
     """Same rules via the backtest loop (much faster), for Monte Carlo."""
     p = bot.PRESETS[preset]
-    ind = bot.indicators(bars, p, *bot.context_series(bars, sim_context(bars, symbol)))
+    ind = bot.indicators(bars, p, *bot.context_series(bars, sim_context(bars, symbol), p.get("regime_key", "above")))
     acct = bot.new_account()
     for i in range(WARMUP_DAYS * BARS_PER_DAY, len(bars)):
         bot.step(acct, bars, ind, i, p)

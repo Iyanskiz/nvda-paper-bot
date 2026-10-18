@@ -20,19 +20,19 @@ Print a 10-year backtest table without the dashboard: `python bot.py --backtest 
    (market cap $2B+, price $5+).
 2. It ranks them by how fast and how steadily they climbed over 90 trading days (Clenow: regression slope x R^2).
 3. Filters: above the 100-day average, within 25% of the 52-week high, no 15%+ one-day jumps, enough volume.
-4. It holds the top 10 equally, only buys while the S&P 500 is above its 200-day average, sells the morning after a
+4. It holds the top 7 equally, only buys while the S&P 500 is above its 200-day average, sells the morning after a
    holding closes below its 100-day average, and fully rebalances every 4 weeks.
 
 Backtests (`python scanner.py --backtest`), $10,000 start, 0.05% cost per trade:
 
 | Test | Scanner | S&P 500 | Equal-weight, same stocks |
 |---|---|---|---|
-| ~2,100 stocks, Oct 2022 to Oct 2026 | 28.9%/yr, worst drop -27% | 18.6%/yr, -19% | 22.2%/yr, -20% |
-| 600 biggest, Oct 2017 to Oct 2026 | 32.6%/yr, worst drop -26% | 12.9%/yr, -34% | 17.8%/yr, -38% |
+| ~2,100 stocks, Oct 2022 to Oct 2026 | 35.8%/yr, worst drop -30% | 18.6%/yr, -19% | 22.2%/yr, -20% |
+| 600 biggest, Oct 2017 to Oct 2026 | 41.2%/yr, worst drop -26% | 12.9%/yr, -34% | 17.8%/yr, -38% |
 
 These use today's stock list, which leaves out companies that collapsed, so all numbers are too rosy. The fair test
 is the equal-weight column, which has the same bias. Weekly rebalancing earned much less (12%/yr in the first test),
-and trailing stops hurt in both tests.
+and trailing stops hurt in both tests. Holding 7 instead of 10 earned more in both tests with about the same worst drop.
 
 ## Running in the cloud (GitHub Actions + Pages)
 
@@ -52,7 +52,8 @@ pre-built once a day with `python bot.py --build-static`, because Pages can only
 - Pulls prices from Yahoo Finance every 60 seconds (free, no API key). CoinGecko only covers crypto, so stocks use Yahoo.
 - Live bot trades 5-minute bars with a $10,000 paper account, saved in `state.json`. Reset it from the dashboard.
 - **Plain** strategy: buy when SMA 20 crosses above SMA 50, sell when it crosses back below.
-- **Swing** strategy (the live bot): buy a close above the 2-day high, sell a close below the 1-day low or on a wide trailing stop. Change it with `--strategy smart` etc.
+- **200-day trend** (the live NVDA bot): stay invested while NVDA closed above its 200-day average yesterday, sell after a close below it, step aside on earnings day. Change it with `--strategy swing` etc.
+- **Swing**: buy a close above the 2-day high, sell a close below the 1-day low or on a wide trailing stop. Safer in falling markets, earns about half as much in rising ones.
 - **Smart** strategy: same crossover plus a 200 SMA trend filter, RSI guard, ATR stop, trailing stop and volatility-based sizing.
 - Backtest tab compares plain, smart and buy-and-hold on daily data.
 

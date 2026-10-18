@@ -25,7 +25,7 @@ CACHE = os.path.join(HERE, "cache")
 FEE = bot.FEE
 
 PARAMS = dict(
-    n=10,                # how many stocks to hold
+    n=7,                 # how many stocks to hold: 7 beat 10 in both backtests (5 earned more but swung harder)
     window=90,           # days in the trend regression
     ma=100,              # must close above this moving average to buy or keep
     max_gap=0.15,        # skip stocks that moved more than 15% in one day lately (news jumps, not trends)
@@ -336,7 +336,9 @@ def live_tick(p=PARAMS, out_dir=None):
     book = st["book"]
     note = lambda msg: st["log"].append([int(time.time()), msg])
 
-    if st.get("last_scan") != today:
+    if st.get("last_scan") != today or st.get("params_used") != p:  # new day, or the rules changed
+        if st.get("last_scan") == today:
+            note("Rules were updated, rescanning with the new settings.")
         uni = universe()
         names = {u["symbol"]: u for u in uni}
         P = load_panel([u["symbol"] for u in uni], "2y")
@@ -353,7 +355,7 @@ def live_tick(p=PARAMS, out_dir=None):
         # the 100-day average each holding has to stay above (checked every run, acted on at the close)
         watch = set(book["pos"]) | {o["sym"] for o in book["pending"] if o["side"] == "BUY"}
         st["sell_line"] = {s: round(float(ind["ma"][s].iloc[t]), 4) for s in watch if np.isfinite(ind["ma"][s].iloc[t])}
-        st.update(last_scan=today, scan_date=P["C"].index[t], regime=regime, universe_size=len(uni),
+        st.update(last_scan=today, params_used=dict(p), scan_date=P["C"].index[t], regime=regime, universe_size=len(uni),
                   passed=len(ranks), spy_close=float(P["C"]["SPY"].iloc[t]), spy_ma=float(ind["spy_ma"].iloc[t]))
         rows = []
         for i, s in enumerate(ranks[:40], 1):

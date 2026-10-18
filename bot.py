@@ -36,7 +36,13 @@ PRESETS = {
     "smart": dict(kind="cross", fast=20, slow=50, trend=200, rsi_max=75, risk=0.10, stop_atr=2.5, trail_atr=5),
     # buy a close above the 20-bar high in an uptrend, sell a close below the 10-bar low
     "breakout": dict(kind="breakout", fast=20, slow=50, trend=200, rsi_max=101, risk=0.10, stop_atr=2.5, trail_atr=5),
-    # live bot default. Built for 5-minute bars: buy a close above the 2-day high (156 bars),
+    # live bot default since Oct 18: stay invested while NVDA closed above its 200-day average yesterday,
+    # pull out after a close below it (and around earnings). Tested vs "swing": in 8-week simulations the
+    # typical bull market made +16% vs +8% (holding: +18%), but bad cases were deeper (-6% to -14% vs -2% to -4%).
+    # 10 years of daily NVDA: 54%/yr with a -53% worst drop, vs holding 54%/yr and -66%.
+    "trend": dict(kind="trend", fast=20, slow=50, trend=0, rsi_max=101, risk=None, stop_atr=0, trail_atr=0,
+                  regime=True, regime_key="above", earnings_guard=True),
+    # Built for 5-minute bars: buy a close above the 2-day high (156 bars),
     # sell on a close below the 1-day low (78 bars) or a 12 ATR trailing stop. Slow on purpose:
     # in 4-week simulations it won 77% of bull runs vs 36% for "smart", which overtrades on 5m bars.
     "swing": dict(kind="breakout", fast=20, slow=50, trend=0, rsi_max=101, risk=0.10, stop_atr=5,
@@ -246,30 +252,45 @@ def past_earnings(symbol):
 NO_CONTEXT = dict(above={}, earnings=None, past_earnings=[], s200=None, close=None)
 
 
+def trend_flags(dates, closes):
+    """Daily trend flags by date: above the 200-day, above the 50-day, and 50-day above 200-day too."""
+    s50, s200 = sma(closes, 50), sma(closes, 200)
+    out = dict(above={}, above50={}, trend={})
+    for d, c, a, b in zip(dates, closes, s50, s200):
+        out["above"][d] = b is not None and c > b
+        out["above50"][d] = a is not None and c > a
+        out["trend"][d] = a is not None and b is not None and c > a and a > b
+    return out, s50[-1], s200[-1]
+
+
+REGIME_TEXT = dict(above="its 200-day average", above50="its 50-day average",
+                   trend="its 50-day average (with the 50-day above the 200-day)")
+
+
 def daily_context(symbol, max_age=3600):
     """Whether the stock closed above its 200-day average on each day, plus the next earnings date."""
     hit = _ctx_cache.get(symbol)
     if hit and time.time() - hit[0] < max_age:
         return hit[1]
     bars, _ = fetch_bars(symbol, "1d", "2y")
-    s200 = sma([b["c"] for b in bars], 200)
-    above = {datetime.fromtimestamp(b["t"], ET).date().isoformat(): (s is not None and b["c"] > s)
-             for b, s in zip(bars, s200)}
-    ctx = dict(above=above, s200=s200[-1], close=bars[-1]["c"], earnings=earnings_date(symbol),
+    flags, s50, s200 = trend_flags([datetime.fromtimestamp(b["t"], ET).date().isoformat() for b in bars],
+                                   [b["c"] for b in bars])
+    ctx = dict(flags, s200=s200, s50=s50, close=bars[-1]["c"], earnings=earnings_date(symbol),
                past_earnings=past_earnings(symbol))
     _ctx_cache[symbol] = (time.time(), ctx)
     return ctx
 
 
-def context_series(bars, ctx):
-    """Regime for each bar = above the 200-day at the PREVIOUS daily close (no peeking at today)."""
-    days = sorted(ctx["above"])
+def context_series(bars, ctx, key="above"):
+    """Regime for each bar = the daily flag at the PREVIOUS daily close (no peeking at today)."""
+    flags = ctx.get(key) or ctx["above"]
+    days = sorted(flags)
     regime, earn = [], []
     j, prev = 0, None
     for b in bars:
         d = datetime.fromtimestamp(b["t"], ET).date().isoformat()
         while j < len(days) and days[j] < d:
-            prev = ctx["above"][days[j]]
+            prev = flags[days[j]]
             j += 1
         regime.append(prev)
         earn.append(d == ctx.get("earnings") or d in ctx.get("past_earnings", ()))
@@ -304,7 +325,7 @@ def _sell(acct, bar, price, reason):
 
 def _exit_signal(p, ind, i, b):
     if p.get("regime") and ind["regime"][i] is False:
-        return "NVDA fell below its 200-day average, pulling out"
+        return f"closed below {REGIME_TEXT.get(p.get('regime_key', 'above'))}, pulling out"
     if p.get("earnings_guard") and ind["earnings"][i] and ind["bar_no"][i] >= 74:
         return "earnings report tonight, not holding through it"
     k = p["kind"]
@@ -338,6 +359,9 @@ def _entry_signal(acct, p, ind, i, b):
     elif k == "breakout":
         if ind["hi20"][i] is not None and b["c"] > ind["hi20"][i]:
             return f"broke above {p.get('hi_n', 20)}-bar high"
+    elif k == "trend":  # stay invested while the daily trend is up; the regime filter does the selling
+        if ind["regime"][i]:
+            return f"daily uptrend: closed above {REGIME_TEXT.get(p.get('regime_key', 'above'))}"
     elif k == "pullback":
         r2 = ind["rsi2"][i]
         if r2 is not None and r2 < p["rsi_max"]:
@@ -348,7 +372,7 @@ def _entry_signal(acct, p, ind, i, b):
 def _blocked(acct, p, ind, i, b):
     """Filters from the research. Returns the reason an entry is vetoed, or None."""
     if p.get("regime") and ind["regime"][i] is False:
-        return "NVDA is below its 200-day average"
+        return f"below {REGIME_TEXT.get(p.get('regime_key', 'above'))}"
     if p.get("earnings_guard") and ind["earnings"][i]:
         return "earnings day"
     if p.get("skip_open") and ind["bar_no"][i] < p["skip_open"]:
@@ -458,7 +482,7 @@ RANGES = {"5m": ["60d"], "1h": ["730d"], "1d": ["2y", "5y", "10y"]}
 
 def backtest(bars, preset, warmup=200, per_year=252, ctx=None):
     p = PRESETS[preset]
-    ind = indicators(bars, p, *(context_series(bars, ctx) if ctx else ()))
+    ind = indicators(bars, p, *(context_series(bars, ctx, p.get("regime_key", "above")) if ctx else ()))
     acct, in_mkt = new_account(), 0
     for i in range(warmup, len(bars)):
         step(acct, bars, ind, i, p)
@@ -477,7 +501,7 @@ def buy_and_hold(bars, warmup=200, per_year=252):
 class LiveBot:
     INTERVAL, RANGE, BAR_SEC = "5m", "5d", 300
 
-    def __init__(self, symbol, preset="swing", feed=fetch_bars, clock=time.time, state_file=STATE_FILE,
+    def __init__(self, symbol, preset="trend", feed=fetch_bars, clock=time.time, state_file=STATE_FILE,
                  context=None):
         # feed and clock are swappable so the simulator can drive this exact class
         self.symbol, self.preset = symbol, preset
@@ -514,7 +538,7 @@ class LiveBot:
         closed = [b for b in bars if b["t"] + self.BAR_SEC <= now]
         p = PRESETS[self.preset]
         ctx = self.context(self.symbol)
-        ind = indicators(closed, p, *context_series(closed, ctx))
+        ind = indicators(closed, p, *context_series(closed, ctx, p.get("regime_key", "above")))
         with self.lock:
             self.bars, self.quote, self.ind, self.error, self.ctx = closed, quote, ind, None, ctx
             a = self.acct
@@ -599,12 +623,20 @@ def checklist(acct, p, ind, bars, ctx, i=-1):
         lim = acct.get("day_start")
         blocked = bool(lim) and acct.get("day") == ind["day"][i] and acct["cash"] < lim * (1 - p["day_loss"])
         rows.append((f"Daily loss under {p['day_loss']:.0%}", not blocked, "Trading paused for today" if blocked else "OK"))
-    if acct["shares"] > 0:
+    if acct["shares"] > 0 and p["kind"] == "trend":
+        rows.append(("Holding position", True,
+                     f"{acct['shares']:.2f} sh from ${acct['entry']:,.2f}. Stays in while NVDA closes above its "
+                     f"200-day average (${ctx.get('s200') or 0:,.2f}); sells at the next open after a close below it"))
+        decision = "HOLDING: uptrend intact" if all(r[1] for r in rows) else "PULLING OUT"
+    elif acct["shares"] > 0:
         lo = ind["lo10"][i]
         rows.append(("Holding position", True,
                      f"{acct['shares']:.2f} sh from ${acct['entry']:,.2f}. Sells if price hits the stop "
                      f"${acct['stop']:,.2f} or closes under ${lo:,.2f}" if lo else "holding"))
         decision = "HOLDING: trend intact" if all(r[1] for r in rows) else "PULLING OUT"
+    elif p["kind"] == "trend":
+        bad = next((r for r in rows if not r[1]), None)
+        decision = ("STAYING OUT: " + bad[2]) if bad else "READY TO BUY: daily uptrend confirmed"
     else:
         gates = list(rows)
         hi = ind["hi20"][i]
@@ -661,7 +693,7 @@ def replay_report(symbol, interval, preset):
     bars, _ = fetch_bars(symbol, interval, REPLAY_RANGE[interval])
     p = PRESETS[preset]
     ctx = own_context(bars) if interval == "1d" else safe_context(symbol)
-    regime, earn = context_series(bars, ctx)
+    regime, earn = context_series(bars, ctx, p.get("regime_key", "above"))
     ind = indicators(bars, p, regime, earn)
     acct = new_account()
     stops, held = [], []
@@ -678,10 +710,10 @@ def replay_report(symbol, interval, preset):
 
 
 def own_context(bars):
-    """Regime from the bars themselves (daily data that already spans years)."""
-    s200 = sma([b["c"] for b in bars], 200)
-    return dict(NO_CONTEXT, above={datetime.fromtimestamp(b["t"], ET).date().isoformat(): (s is not None and b["c"] > s)
-                                   for b, s in zip(bars, s200)})
+    """Daily flags from the bars themselves (daily data that already spans years)."""
+    flags, s50, s200 = trend_flags([datetime.fromtimestamp(b["t"], ET).date().isoformat() for b in bars],
+                                   [b["c"] for b in bars])
+    return dict(NO_CONTEXT, **flags, s50=s50, s200=s200)
 
 
 def safe_context(symbol):
@@ -777,7 +809,7 @@ def make_handler(bot):
     return H
 
 
-STRATEGIES = ["swing", "smart", "plain", "breakout", "pullback"]  # the ones the dashboard offers
+STRATEGIES = ["trend", "swing", "smart", "plain", "breakout", "pullback"]  # the ones the dashboard offers
 SIM_WEEKS, SIM_SEEDS = (2, 4, 6, 8), (1, 2, 3, 4, 5)
 
 
@@ -852,7 +884,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbol", default="NVDA")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--strategy", default="swing", choices=list(PRESETS), help="strategy the live bot trades")
+    ap.add_argument("--strategy", default="trend", choices=list(PRESETS), help="strategy the live bot trades")
     ap.add_argument("--backtest", action="store_true", help="print a backtest table and exit")
     ap.add_argument("--build-static", action="store_true",
                     help="pre-build Simulator and Backtest data into docs/static for the hosted dashboard")

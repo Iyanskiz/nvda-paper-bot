@@ -62,13 +62,13 @@
 </head>
 <body>
 <header>
-  <h1 id="title">Paper Trading Bot</h1>
+  <h1 id="title">Paper Trading Bots</h1>
   <span class="badge">PAPER MONEY ONLY</span>
   <span class="badge" id="status">connecting...</span>
   <div class="tabs">
-    <button data-tab="live" class="on">Live</button>
+    <button data-tab="scan" class="on">Stock scanner</button>
+    <button data-tab="live">NVDA bot</button>
     <button data-tab="replay">Simulator</button>
-    <button data-tab="scan">Stock scanner</button>
     <button data-tab="bt">Backtest</button>
     <button data-tab="how">How it works</button>
   </div>
@@ -76,7 +76,7 @@
 
 <main>
   <!-- LIVE -->
-  <section id="live">
+  <section id="live" class="hidden">
     <div class="grid kpis">
       <div class="card kpi"><div class="l">Price</div><div class="v" id="k-price">-</div></div>
       <div class="card kpi"><div class="l">Equity</div><div class="v" id="k-eq">-</div></div>
@@ -178,7 +178,7 @@
   </section>
 
   <!-- STOCK SCANNER -->
-  <section id="scan" class="hidden">
+  <section id="scan">
     <p class="note" id="sc-msg" style="margin-top:0"></p>
     <div class="grid kpis">
       <div class="card kpi"><div class="l">Scanner account</div><div class="v" id="sc-eq">-</div></div>
@@ -286,7 +286,11 @@
       <h2>Two strategies, side by side</h2>
       <p><b>Plain</b> is the assignment: buy when the 20-bar average crosses above the 50-bar average
         (golden cross), sell when it crosses back below (death cross). All in, no stop.</p>
-      <p><b>Swing</b> is what the live bot runs now. It buys when NVDA closes above its highest price of the last 2 trading days
+      <p><b>200-day trend</b> is what the live NVDA bot runs now. It stays invested while NVDA closed above its 200-day
+        average the day before, sells at the next open after a close below it, and steps aside around earnings reports.
+        It was picked because it made the most money in rising markets (8-week simulations: +16% typical vs +8% for Swing)
+        and on real data, at the cost of deeper losses when NVDA falls.</p>
+      <p><b>Swing</b> (the previous live strategy) buys when NVDA closes above its highest price of the last 2 trading days
         (156 five-minute bars) and sells on a close below the last 1-day low, or if a wide trailing stop (12x ATR, about 3-4% below the peak) is hit.
         It was picked because it held up in hundreds of simulated markets; the faster settings traded too often and lost to costs.</p>
       <p><b>Smart crossover</b> keeps the assignment's crossover and adds the risk rules from the playbook:</p>
@@ -349,10 +353,10 @@ document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
 });
 
 let priceChart, eqChart, btChart, btLoaded = false;
-const names = {swing: "Swing (live bot)", plain: "Plain crossover", smart: "Smart crossover", breakout: "Breakout",
+const names = {trend: "200-day trend (live bot)", swing: "Swing breakout", plain: "Plain crossover", smart: "Smart crossover", breakout: "Breakout",
                pullback: "Pullback", hold: "Buy and hold"};
-const COLORS = {hold: "#8b949e", plain: "#d29922", smart: "#3fb950", breakout: "#58a6ff", pullback: "#bc8cff", swing: "#ff7b72"};
-const STRATS = ["swing", "smart", "plain", "breakout", "pullback"];
+const COLORS = {hold: "#8b949e", plain: "#d29922", smart: "#3fb950", breakout: "#58a6ff", pullback: "#bc8cff", swing: "#ff7b72", trend: "#56d4dd"};
+const STRATS = ["trend", "swing", "smart", "plain", "breakout", "pullback"];
 
 // Hosted on GitHub Pages there is no server: every API call maps to a file the cloud job pre-builds.
 const HOSTED = !["localhost", "127.0.0.1", ""].includes(location.hostname);
@@ -414,7 +418,7 @@ async function refreshLive() {
   } catch (e) {
     $("status").textContent = HOSTED ? "no bot data yet" : "server offline"; $("status").className = "badge err"; return;
   }
-  $("title").textContent = `${s.symbol} Paper Trading Bot`;
+  // the page covers the whole-market scanner and the NVDA bot, so keep the general title
   const when = s.updated_at ? new Date(s.updated_at * 1000) : new Date();
   $("status").textContent = s.error ? "data error: " + s.error
     : (HOSTED ? "bot last ran " : "updated ") + ptStamp(when.getTime() / 1000);
@@ -501,6 +505,8 @@ async function refreshLive() {
 $("reset").onclick = async () => {
   if (!confirm("Reset the paper account to $10,000 and clear its trades?")) return;
   await fetch("/api/reset", {method: "POST"}); refreshLive();
+loadScanner();
+setInterval(() => { if (!$("scan").classList.contains("hidden")) loadScanner(); }, 60000);
 };
 
 let btReq = 0;
@@ -529,7 +535,7 @@ async function runBacktest() {
 
   const labels = r.runs.hold.equity.map(e => tlabel(e[0], daily));
   const ds = Object.keys(r.runs).map(k => lineDs(names[k], r.runs[k].equity.map(e => e[1]), COLORS[k],
-                                                  k === "swing" ? {borderWidth: 2.5} : {}));
+                                                  k === "trend" ? {borderWidth: 2.5} : {}));
   if (btChart) btChart.destroy();
   btChart = new Chart($("c-bt"), {type: "line", data: {labels, datasets: ds},
     options: {animation: false, maintainAspectRatio: false, interaction: {mode: "index", intersect: false},
@@ -850,6 +856,8 @@ if (HOSTED) {
 }
 
 refreshLive();
+loadScanner();
+setInterval(() => { if (!$("scan").classList.contains("hidden")) loadScanner(); }, 60000);
 setInterval(refreshLive, 15000);
 </script>
 </body>

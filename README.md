@@ -19,6 +19,8 @@ Each run catches up on finished 5-minute bars, saves the paper account to `state
 so the history is in the commit log), and publishes the dashboard to GitHub Pages. Simulator and Backtest data are
 pre-built once a day with `python bot.py --build-static`, because Pages can only serve files.
 
+- Vercel: `vercel/vercel.json` is a mirror that proxies the GitHub Pages site, so it always shows the latest run
+  and never needs redeploying. Deploy with `vercel deploy vercel --prod`.
 - Run it by hand: Actions tab, "paper-bot", "Run workflow".
 - Pause it: Actions tab, "paper-bot", "...", "Disable workflow".
 - On the hosted page the Simulator offers 5 pre-built markets per setting and the Backtest is NVDA only. Run locally for everything.

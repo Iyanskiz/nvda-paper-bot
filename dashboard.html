@@ -91,6 +91,10 @@
         </div>
       </div>
     </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Day by day</h2>
+      <div class="scroll wide"><table id="days"></table></div>
+    </div>
     <div class="grid two" style="margin-top:12px">
       <div class="card">
         <h2>Paper equity</h2>
@@ -279,7 +283,8 @@ function staticUrl(path, q) {
   throw new Error("not available on the hosted page");
 }
 async function api(path, q = {}) {
-  const url = HOSTED ? staticUrl(path, q) : path + (Object.keys(q).length ? "?" + new URLSearchParams(q) : "");
+  let url = HOSTED ? staticUrl(path, q) : path + (Object.keys(q).length ? "?" + new URLSearchParams(q) : "");
+  if (HOSTED && path === "/api/live") url += "?t=" + Date.now();  // skip CDN caches, always the latest run
   const r = await fetch(url, {cache: "no-store"});
   const body = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
   if (!r.ok && !body.error) body.error = `HTTP ${r.status}`;
@@ -371,6 +376,16 @@ async function refreshLive() {
   } else { eqChart.data.labels = eqLabels; eqChart.data.datasets = eqData; eqChart.update(); }
 
   tradeTable($("trades"), s.trades, false);
+  const days = Object.entries(s.days || {}).sort((x, y) => x[0] < y[0] ? 1 : -1);
+  $("days").innerHTML = `<tr><th>Day</th><th>Bot account</th><th>Day change</th><th>NVDA close</th>
+      <th>If you just held NVDA</th><th>Bot vs holding</th></tr>` + (days.map(([d, [eq, close]], k) => {
+    const prev = days[k + 1] ? days[k + 1][1][0] : s.start_cash;
+    const hold = s.start_price ? s.start_cash * close / s.start_price : null;
+    const cls = v => v >= 0 ? "up" : "down";
+    return `<tr><td>${new Date(d + "T12:00").toLocaleDateString([], {weekday: "short", month: "short", day: "numeric"})}</td>
+      <td>${money(eq)}</td><td class="${cls(eq - prev)}">${signed(eq - prev)}</td><td>${money(close)}</td>
+      <td>${hold ? money(hold) : "-"}</td><td class="${cls(eq - hold)}">${hold ? signed(eq - hold) : "-"}</td></tr>`;
+  }).join("") || `<tr><td colspan="6" style="color:var(--muted)">The first row appears after the bot's first trading day (Monday).</td></tr>`);
   if (s.brain) {
     const d = s.brain.decision;
     $("brain-decision").textContent = d;

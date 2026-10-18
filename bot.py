@@ -530,6 +530,8 @@ class LiveBot:
                 is_latest = i == len(closed) - 1
                 act = step(a, closed, ind, i, p, fill_price=quote if is_latest else None)
                 a["last_t"] = b["t"]
+                # end-of-day snapshot (the last bar of each day wins): [bot equity, NVDA close]
+                a.setdefault("days", {})[ind["day"][i]] = [round(a["cash"] + a["shares"] * b["c"], 2), round(b["c"], 2)]
                 if act:
                     t = a["trades"][-1]
                     self._note(f"{act} {t['shares']} @ ${t['price']} ({t['reason']})")
@@ -563,6 +565,7 @@ class LiveBot:
                 equity_now=round(a["cash"] + a["shares"] * px, 2), start_cash=START_CASH,
                 start_price=a.get("start_price"), start_t=a.get("start_t"),
                 hold_now=round(START_CASH * px / a["start_price"], 2) if a.get("start_price") else None,
+                days=a.get("days", {}),
                 equity=a["equity"], trades=a["trades"], log=self.log[-50:],
                 updated_at=int(time.time()),
                 brain=checklist(a, PRESETS[self.preset], self.ind, self.bars, self.ctx) if self.ind else None,

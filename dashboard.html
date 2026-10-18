@@ -46,6 +46,18 @@
   .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
   .err { color: var(--red); }
   .wide { overflow-x: auto; }
+  .grid > * { min-width: 0; }            /* let cards shrink to the screen; wide tables scroll inside them */
+  select, input { max-width: 100%; }
+  .checklist .item { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .checklist .item > span { flex: none; min-width: 34px; font-weight: 600; }
+  .checklist .d { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  @media (max-width: 600px) {
+    main { padding: 12px; }
+    header { padding: 12px; }
+    .tabs { margin-left: 0; flex-wrap: wrap; }
+    .kpi .v { font-size: 18px; }
+    .row label { width: 100%; }
+  }
 </style>
 </head>
 <body>
@@ -77,7 +89,7 @@
     <div class="card" style="margin-bottom:12px">
       <h2>Bot brain: what it's checking right now</h2>
       <div class="v" id="brain-decision" style="font-size:20px;font-weight:600;margin-bottom:6px">-</div>
-      <table id="brain"></table>
+      <div id="brain" class="checklist"></div>
     </div>
     <div class="grid two">
       <div class="card">
@@ -181,7 +193,7 @@
       <h2>What it owns</h2>
       <div class="wide"><table id="sc-hold"></table></div>
       <h2 style="margin-top:14px">Orders for the next open</h2>
-      <div class="wide"><table id="sc-pending"></table></div>
+      <div id="sc-pending" class="checklist"></div>
     </div>
     <div class="card" style="margin-bottom:12px">
       <h2 id="sc-top-h">Strongest trends in the market</h2>
@@ -478,8 +490,8 @@ async function refreshLive() {
     $("k-sig").textContent = short.charAt(0) + short.slice(1).toLowerCase();
     $("k-sig").className = "v " + (short === "READY" || short === "HOLDING" ? "up" : short === "WAITING" ? "" : "down");
     $("brain-decision").className = d.startsWith("READY") || d.startsWith("HOLDING") ? "up" : d.startsWith("WAITING") ? "" : "down";
-    $("brain").innerHTML = s.brain.rows.map(r => `<tr><td class="${r.ok ? "up" : "down"}" style="width:24px">${r.ok ? "&#10003;" : "&#10007;"}</td>
-      <td><b>${r.rule}</b></td><td style="color:var(--muted);white-space:normal">${r.detail}</td></tr>`).join("");
+    $("brain").innerHTML = s.brain.rows.map(r => `<div class="item"><span class="${r.ok ? "up" : "down"}">${r.ok ? "&#10003;" : "&#10007;"}</span>
+      <div><b>${esc(r.rule)}</b><div class="d">${esc(r.detail)}</div></div></div>`).join("");
   }
   $("log").innerHTML = s.log.slice().reverse().map(([t, m]) =>
     `<div><span>${ptStamp(t)}</span>${m}</div>`).join("") ||
@@ -751,10 +763,10 @@ async function loadScanner() {
         <td style="white-space:normal">${esc((s.holding_status || {})[sym] || "")}</td>
         <td style="white-space:normal;color:var(--muted)">${esc(h.reason)}</td></tr>`;
     }).join("") || `<tr><td colspan="9" style="color:var(--muted)">Nothing yet${s.regime ? "" : ": the market trend is down, so it's waiting in cash"}.</td></tr>`);
-  $("sc-pending").innerHTML = (b.pending || []).map(o => `<tr><td class="${o.side === "BUY" ? "up" : "down"}">${o.side}</td>
-      <td><b>${esc(o.sym)}</b> <span style="color:var(--muted)">${esc((s.names || {})[o.sym] || "")}</span></td>
-      <td style="white-space:normal;color:var(--muted)">${esc(o.reason)}</td></tr>`).join("") ||
-    `<tr><td style="color:var(--muted)">No changes planned.</td></tr>`;
+  $("sc-pending").innerHTML = (b.pending || []).map(o => `<div class="item"><span class="${o.side === "BUY" ? "up" : "down"}">${o.side}</span>
+      <div><b>${esc(o.sym)}</b> <span style="color:var(--muted)">${esc((s.names || {})[o.sym] || "")}</span>
+      <div class="d">${esc(o.reason)}</div></div></div>`).join("") ||
+    `<div class="d" style="padding:6px 0">No changes planned.</div>`;
 
   $("sc-top-h").textContent = `Strongest trends in the market (top ${(s.top || []).length} of ${s.passed || 0} that passed every filter)`;
   $("sc-top").innerHTML = `<tr><th>#</th><th>Stock</th><th>Sector</th><th>Price</th><th>Last 90 days</th><th>Smoothness</th><th>Of 52-wk high</th><th></th></tr>` +

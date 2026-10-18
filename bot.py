@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(HERE, "state.json")
 START_CASH = 10_000.0
 ET = ZoneInfo("America/New_York")
+PT = ZoneInfo("America/Los_Angeles")  # every time the bots write for people is Pacific (PDT/PST switch automatically)
 
 # "plain" is the bot from the assignment: buy on golden cross, sell on death cross.
 # "smart" adds the playbook: trend filter, RSI guard, ATR position sizing, ATR stops.
@@ -520,8 +521,8 @@ class LiveBot:
             if a["last_t"] is None and closed:
                 # start fresh from now; don't trade history retroactively
                 a["last_t"] = closed[-1]["t"]
-                self._note(f"Bot started on {self.symbol} at {fmt(closed[-1]['t'])}, "
-                           f"waiting for new 5-minute bars")
+                self._note(f"Bot started on {self.symbol}. Latest finished 5-minute bar closed "
+                           f"{fmt(closed[-1]['t'] + self.BAR_SEC)}; waiting for new bars")
             if "start_price" not in a and closed:
                 a["start_price"], a["start_t"] = closed[-1]["c"], closed[-1]["t"]
             for i, b in enumerate(closed):
@@ -534,6 +535,7 @@ class LiveBot:
                 a.setdefault("days", {})[ind["day"][i]] = [round(a["cash"] + a["shares"] * b["c"], 2), round(b["c"], 2)]
                 if act:
                     t = a["trades"][-1]
+                    t["at"] = int(self.clock())  # the moment the bot acted, not when the bar started
                     self._note(f"{act} {t['shares']} @ ${t['price']} ({t['reason']})")
             a["equity"] = a["equity"][-20000:]
             self._save()
@@ -624,7 +626,8 @@ def checklist(acct, p, ind, bars, ctx, i=-1):
 
 
 def fmt(t):
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
+    """Pacific time, the same on a laptop and on GitHub's servers (which run on UTC)."""
+    return datetime.fromtimestamp(t, PT).strftime("%Y-%m-%d %I:%M:%S %p PT")
 
 
 # ---------------------------------------------------------------- web server

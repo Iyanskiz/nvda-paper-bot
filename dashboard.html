@@ -315,9 +315,14 @@
 <script>
 const $ = id => document.getElementById(id);
 const money = v => v == null ? "-" : "$" + Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+// Every time on the page is Pacific, whatever timezone the viewer's device is in.
+const TZ = "America/Los_Angeles";
+const ptTime = (t, opts = {}) => new Date(t * 1000).toLocaleString("en-US", Object.assign({timeZone: TZ}, opts));
+const ptStamp = t => ptTime(t, {weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit"}) + " PT";
 const tlabel = (t, withDate) => {
   const d = new Date(t * 1000);
-  return withDate ? d.toLocaleDateString() : d.toLocaleString([], {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+  return withDate ? d.toLocaleDateString("en-US", {timeZone: TZ})
+                  : d.toLocaleString("en-US", {timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
 };
 Chart.defaults.color = "#8b949e";
 Chart.defaults.borderColor = "#30363d";
@@ -380,7 +385,7 @@ function lineDs(label, data, color, extra = {}) {
 
 function tradeTable(el, trades, withDate) {
   const rows = trades.slice().reverse().map(t => `<tr>
-    <td>${tlabel(t.t, withDate)}</td>
+    <td>${t.at ? ptStamp(t.at) : tlabel(t.t, withDate)}</td>
     <td class="${t.side === "BUY" ? "up" : "down"}">${t.side}</td>
     <td>${money(t.price)}</td><td>${t.shares}</td>
     <td class="${(t.pnl || 0) >= 0 ? "up" : "down"}">${t.pnl == null ? "" : signed(t.pnl)}</td>
@@ -400,8 +405,7 @@ async function refreshLive() {
   $("title").textContent = `${s.symbol} Paper Trading Bot`;
   const when = s.updated_at ? new Date(s.updated_at * 1000) : new Date();
   $("status").textContent = s.error ? "data error: " + s.error
-    : (HOSTED ? "bot last ran " + when.toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"})
-              : "updated " + when.toLocaleTimeString());
+    : (HOSTED ? "bot last ran " : "updated ") + ptStamp(when.getTime() / 1000);
   $("status").className = "badge" + (s.error ? " err" : "");
   $("bt-sym").placeholder = s.symbol;
 
@@ -478,7 +482,7 @@ async function refreshLive() {
       <td><b>${r.rule}</b></td><td style="color:var(--muted);white-space:normal">${r.detail}</td></tr>`).join("");
   }
   $("log").innerHTML = s.log.slice().reverse().map(([t, m]) =>
-    `<div><span>${new Date(t * 1000).toLocaleTimeString()}</span>${m}</div>`).join("") ||
+    `<div><span>${ptStamp(t)}</span>${m}</div>`).join("") ||
     `<div style="color:var(--muted)">Waiting for first data...</div>`;
 }
 
@@ -715,7 +719,7 @@ async function loadScanner() {
   }
   const b = s.book, start = s.start_cash;
   $("sc-msg").textContent = `Last scan used prices from ${dayLabel(s.scan_date)}. ` +
-    (s.updated_at ? `Last update ${new Date(s.updated_at * 1000).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"})}.` : "");
+    (s.updated_at ? `Last update ${ptStamp(s.updated_at)}.` : "");
   $("sc-eq").textContent = money(s.equity_now);
   const pnl = s.equity_now - start;
   $("sc-pnl").textContent = signed(pnl); $("sc-pnl").className = "v " + (pnl >= 0 ? "up" : "down");
@@ -734,7 +738,7 @@ async function loadScanner() {
   const held = Object.entries(b.pos).sort((x, y) => (y[1].last / y[1].entry) - (x[1].last / x[1].entry));
   const chk = s.check || {};
   const lines = Object.fromEntries((chk.rows || []).map(r => [r.sym, r]));
-  $("sc-check").innerHTML = chk.verdict ? `Latest check (${new Date(chk.t * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}): ${esc(chk.verdict)}` : "";
+  $("sc-check").innerHTML = chk.verdict ? `Latest check (${ptStamp(chk.t)}): ${esc(chk.verdict)}` : "";
   $("sc-check").className = /below the sell line/.test(chk.verdict || "") ? "down" : "";
   $("sc-hold").innerHTML = `<tr><th>Stock</th><th>Bought</th><th>Price now</th><th>Gain</th><th>Value</th><th title="100-day average: a close below it means sell at the next open">Sell line</th><th>Room</th><th>Status at last scan</th><th>Why it was bought</th></tr>` +
     (held.map(([sym, h]) => {
@@ -768,9 +772,9 @@ async function loadScanner() {
         <td>${money(spy)}</td><td>${hold ? money(hold) : "-"}</td><td class="${eq >= hold ? "up" : "down"}">${hold ? signed(eq - hold) : "-"}</td></tr>`;
     }).join("") || `<tr><td colspan="6" style="color:var(--muted)">The first row appears after its first trading day.</td></tr>`);
   $("sc-log").innerHTML = (s.log || []).slice().reverse().map(([t, m]) =>
-    `<div><span>${new Date(t * 1000).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"})}</span>${esc(m)}</div>`).join("");
+    `<div><span>${ptStamp(t)}</span>${esc(m)}</div>`).join("");
   $("sc-trades").innerHTML = `<tr><th>Date</th><th>Side</th><th>Stock</th><th>Price</th><th>Result</th><th>Why</th></tr>` +
-    (b.trades.slice().reverse().map(x => `<tr><td>${dayLabel(x.date)}</td><td class="${x.side === "BUY" ? "up" : "down"}">${x.side}</td>
+    (b.trades.slice().reverse().map(x => `<tr><td>${x.at ? ptStamp(x.at) : dayLabel(x.date)}</td><td class="${x.side === "BUY" ? "up" : "down"}">${x.side}</td>
       <td><b>${esc(x.sym)}</b></td><td>${money(x.price)}</td>
       <td class="${(x.pnl || 0) >= 0 ? "up" : "down"}">${x.pnl == null ? "" : `${signed(x.pnl)} (${pct(x.ret)})`}</td>
       <td style="white-space:normal;color:var(--muted)">${esc(x.reason)}</td></tr>`).join("") ||

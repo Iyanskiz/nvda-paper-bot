@@ -379,12 +379,14 @@ def live_tick(p=PARAMS, out_dir=None):
             done = len(book["trades"])
             execute(book, prices, today, equity_of(book, prices), p, st.get("atr"))
             for x in book["trades"][done:]:
+                x["at"] = int(time.time())
                 note(f"{x['side']} {x['sym']} @ ${x['price']:,.2f}: {x['reason']}")
         lows = {s: v["low"] for s, v in live.items()}
         opens = {s: v["open"] for s, v in live.items()}
         done = len(book["trades"])
         check_stops(book, lows, opens, today)
         for x in book["trades"][done:]:
+            x["at"] = int(time.time())
             note(f"SELL {x['sym']} @ ${x['price']:,.2f}: {x['reason']}")
     for s, h in book["pos"].items():
         if s in prices:

@@ -30,6 +30,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+
+      - name: Install the scanner's math libraries
+        run: pip install --quiet numpy pandas
 
       - name: Today's date
         id: date
@@ -41,20 +45,26 @@ jobs:
         uses: actions/cache@v4
         with:
           path: docs/static
-          key: static-${{ steps.date.outputs.day }}
+          key: static-v2-${{ steps.date.outputs.day }}
 
       - name: Run the bot once
         run: python bot.py --tick
 
+      # Scans every US stock once each morning, trades at the open, then just watches its holdings.
+      - name: Run the stock scanner once
+        run: python scanner.py --tick
+
       - name: Build Simulator and Backtest data
         if: steps.static.outputs.cache-hit != 'true'
-        run: python bot.py --build-static
+        run: |
+          python bot.py --build-static
+          python scanner.py --build-static
 
       - name: Save the paper account
         run: |
           git config user.name "paper-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state.json
+          git add state.json scanner_state.json
           if git diff --cached --quiet; then
             echo "no new bars, nothing to save"
           else

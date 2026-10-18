@@ -720,6 +720,17 @@ def make_handler(bot):
                     rng = q.get("range", [RANGES[iv][-1]])[0]
                     rng = rng if rng in RANGES[iv] else RANGES[iv][-1]
                     self._send(200, backtest_report(sym, rng, iv))
+                elif u.path == "/api/scanner":
+                    import scanner
+                    self._send(200, scanner.view())
+                elif u.path == "/api/scanner_backtest":
+                    import scanner
+                    path = os.path.join(HERE, "cache", "scanner_backtest.json")
+                    if not os.path.exists(path) or time.time() - os.path.getmtime(path) > 86400:
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                        scanner.build_backtest(path)
+                    with open(path, "rb") as f:
+                        self._send(200, f.read())
                 elif u.path == "/api/rules":
                     self._send(200, dict(rules=RULES, reality=REALITY, live=bot.preset))
                 elif u.path in ("/api/sim", "/api/montecarlo"):

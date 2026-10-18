@@ -56,6 +56,7 @@
   <div class="tabs">
     <button data-tab="live" class="on">Live</button>
     <button data-tab="replay">Simulator</button>
+    <button data-tab="scan">Stock scanner</button>
     <button data-tab="bt">Backtest</button>
     <button data-tab="how">How it works</button>
   </div>
@@ -164,6 +165,74 @@
       the dotted red line is the stop.</p>
   </section>
 
+  <!-- STOCK SCANNER -->
+  <section id="scan" class="hidden">
+    <p class="note" id="sc-msg" style="margin-top:0"></p>
+    <div class="grid kpis">
+      <div class="card kpi"><div class="l">Scanner account</div><div class="v" id="sc-eq">-</div></div>
+      <div class="card kpi"><div class="l">P&amp;L</div><div class="v" id="sc-pnl">-</div></div>
+      <div class="card kpi"><div class="l" id="sc-vs-l">vs. S&amp;P 500</div><div class="v" id="sc-vs">-</div></div>
+      <div class="card kpi"><div class="l">Holdings</div><div class="v" id="sc-n">-</div></div>
+      <div class="card kpi"><div class="l">Market trend</div><div class="v" id="sc-regime">-</div></div>
+      <div class="card kpi"><div class="l">Scanned / passed</div><div class="v" id="sc-scanned">-</div></div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <h2>What it owns</h2>
+      <div class="wide"><table id="sc-hold"></table></div>
+      <h2 style="margin-top:14px">Orders for the next open</h2>
+      <div class="wide"><table id="sc-pending"></table></div>
+    </div>
+    <div class="card" style="margin-bottom:12px">
+      <h2 id="sc-top-h">Strongest trends in the market</h2>
+      <div class="scroll wide" style="max-height:420px"><table id="sc-top"></table></div>
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h2>Day by day vs. the S&amp;P 500</h2>
+        <div class="scroll wide"><table id="sc-days"></table></div>
+      </div>
+      <div class="card">
+        <h2>Scanner log</h2>
+        <div class="scroll log" id="sc-log"></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Trades</h2>
+      <div class="scroll wide"><table id="sc-trades"></table></div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Would it have worked? Backtest of the exact same rules</h2>
+      <div class="row">
+        <select id="sc-bt-pick">
+          <option value="all_5y">All ~2,100 tradeable US stocks, last 4 years</option>
+          <option value="big600_10y">600 biggest companies, last 9 years (incl. 2020 and 2022 sell-offs)</option>
+        </select>
+        <span class="note" id="sc-bt-msg"></span>
+      </div>
+      <div class="wide"><table id="sc-bt-table"></table></div>
+      <div class="chart" style="margin-top:10px"><canvas id="c-scbt"></canvas></div>
+      <p class="note"><b>Honest caveat:</b> these tests use today's list of stocks, which leaves out companies that went
+        bankrupt or shrank. That makes every result look better than reality. The equal-weight row holds every stock on the
+        same list, so it has the same bias: the fair test is whether the scanner beats that row, not just the S&amp;P 500.</p>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>How it picks</h2>
+      <ol>
+        <li>Every weekday morning it pulls the full list of ~7,000 US stocks from Nasdaq and keeps real companies
+          (worth $2B+, priced $5+, about 2,100 stocks).</li>
+        <li>It scores each one by how fast <i>and</i> how steadily it has climbed over the last 90 trading days
+          (Clenow's trend slope x smoothness; steady climbers keep going more often than one-day spikes).</li>
+        <li>It skips stocks below their 100-day average, more than 25% under their 52-week high, that jumped 15%+ in a
+          day recently, or that trade too little.</li>
+        <li>It only buys while the S&amp;P 500 is above its 200-day average. In a falling market it buys nothing new.</li>
+        <li>It holds the top <span class="p-n">10</span> in equal amounts. It sells a stock the morning after it closes below its
+          100-day average (the trend broke), and at each rebalance (every <span class="p-w">4</span> weeks) it swaps out anything
+          that fell out of the top <span class="p-x">20</span>.</li>
+        <li>It decides after the close and trades at the next open, paying 0.05% per trade, like a real account.</li>
+      </ol>
+    </div>
+  </section>
+
   <!-- BACKTEST -->
   <section id="bt" class="hidden">
     <div class="row">
@@ -255,7 +324,8 @@ Chart.defaults.font.family = "system-ui, sans-serif";
 
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
-  ["live", "replay", "bt", "how"].forEach(id => $(id).classList.toggle("hidden", id !== b.dataset.tab));
+  ["live", "replay", "scan", "bt", "how"].forEach(id => $(id).classList.toggle("hidden", id !== b.dataset.tab));
+  if (b.dataset.tab === "scan") loadScanner();
   if (b.dataset.tab === "bt" && !btLoaded) runBacktest();
   if (b.dataset.tab === "replay" && !rp) loadReplay();
 });
@@ -279,12 +349,14 @@ function staticUrl(path, q) {
     case "/api/replay": return `static/replay_${q.interval}_${q.strategy}.json`;
     case "/api/sim": return `static/sim_${q.scenario}_${q.weeks}_${q.seed}_${q.strategy}.json`;
     case "/api/montecarlo": return `static/mc_${q.scenario}_${q.weeks}_${q.strategy}.json`;
+    case "/api/scanner": return "scanner.json";
+    case "/api/scanner_backtest": return "static/scanner_backtest.json";
   }
   throw new Error("not available on the hosted page");
 }
 async function api(path, q = {}) {
   let url = HOSTED ? staticUrl(path, q) : path + (Object.keys(q).length ? "?" + new URLSearchParams(q) : "");
-  if (HOSTED && path === "/api/live") url += "?t=" + Date.now();  // skip CDN caches, always the latest run
+  if (HOSTED && (path === "/api/live" || path === "/api/scanner")) url += "?t=" + Date.now();  // skip CDN caches
   const r = await fetch(url, {cache: "no-store"});
   const body = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
   if (!r.ok && !body.error) body.error = `HTTP ${r.status}`;
@@ -610,6 +682,118 @@ $("rp-scrub").oninput = () => {
   if (!rp) return;
   stopReplay(); rpI = Number($("rp-scrub").value); lastWhy = null; drawReplay();
 };
+
+// ---------------------------------------------------------------- stock scanner
+let scBt = null, scChart = null, scReq = 0;
+const pct = (v, d = 1) => v == null || !isFinite(v) ? "-" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(d)}%`;
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const dayLabel = d => new Date(d + "T12:00").toLocaleDateString([], {weekday: "short", month: "short", day: "numeric"});
+
+async function loadScanner() {
+  const my = ++scReq;
+  const s = await api("/api/scanner").catch(e => ({error: "Could not load the scanner"}));
+  if (my !== scReq) return;
+  if (s.params) {
+    document.querySelectorAll(".p-n").forEach(e => e.textContent = s.params.n);
+    document.querySelectorAll(".p-w").forEach(e => e.textContent = s.params.every_weeks || 1);
+    document.querySelectorAll(".p-x").forEach(e => e.textContent = s.params.n * s.params.exit_rank);
+  }
+  if (!scBt) loadScannerBacktest();
+  if (s.error || !s.book) {
+    $("sc-msg").textContent = s.error || "No scanner data yet.";
+    for (const id of ["sc-hold", "sc-pending", "sc-top", "sc-days", "sc-trades"]) $(id).innerHTML = "";
+    return;
+  }
+  const b = s.book, start = s.start_cash;
+  $("sc-msg").textContent = `Last scan used prices from ${dayLabel(s.scan_date)}. ` +
+    (s.updated_at ? `Last update ${new Date(s.updated_at * 1000).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"})}.` : "");
+  $("sc-eq").textContent = money(s.equity_now);
+  const pnl = s.equity_now - start;
+  $("sc-pnl").textContent = signed(pnl); $("sc-pnl").className = "v " + (pnl >= 0 ? "up" : "down");
+  const spyNow = s.spy_now || (Object.values(s.days || {}).at(-1) || [])[1];
+  if (s.start_spy && spyNow) {
+    const spyVal = start * spyNow / s.start_spy, d = s.equity_now - spyVal;
+    $("sc-vs").textContent = signed(d); $("sc-vs").className = "v " + (d >= 0 ? "up" : "down");
+    $("sc-vs-l").textContent = `vs. S&P 500 since ${dayLabel(s.start_date)} (${money(spyVal)})`;
+  }
+  $("sc-n").textContent = `${Object.keys(b.pos).length} / ${s.params.n}`;
+  $("sc-regime").textContent = s.regime ? "Up" : "Down";
+  $("sc-regime").className = "v " + (s.regime ? "up" : "down");
+  $("sc-regime").title = `S&P 500 ${money(s.spy_close)} vs 200-day average ${money(s.spy_ma)}`;
+  $("sc-scanned").textContent = `${(s.universe_size || 0).toLocaleString()} / ${s.passed || 0}`;
+
+  const held = Object.entries(b.pos).sort((x, y) => (y[1].last / y[1].entry) - (x[1].last / x[1].entry));
+  $("sc-hold").innerHTML = `<tr><th>Stock</th><th>Bought</th><th>Price now</th><th>Gain</th><th>Value</th><th>Status today</th><th>Why it was bought</th></tr>` +
+    (held.map(([sym, h]) => {
+      const g = h.last / h.entry - 1;
+      return `<tr><td><b>${esc(sym)}</b> <span style="color:var(--muted)">${esc((s.names || {})[sym] || "")}</span></td>
+        <td>${dayLabel(h.date)} @ ${money(h.entry)}</td><td>${money(h.last)}</td>
+        <td class="${g >= 0 ? "up" : "down"}">${pct(g)}</td><td>${money(h.shares * h.last)}</td>
+        <td style="white-space:normal">${esc((s.holding_status || {})[sym] || "")}</td>
+        <td style="white-space:normal;color:var(--muted)">${esc(h.reason)}</td></tr>`;
+    }).join("") || `<tr><td colspan="7" style="color:var(--muted)">Nothing yet${s.regime ? "" : ": the market trend is down, so it's waiting in cash"}.</td></tr>`);
+  $("sc-pending").innerHTML = (b.pending || []).map(o => `<tr><td class="${o.side === "BUY" ? "up" : "down"}">${o.side}</td>
+      <td><b>${esc(o.sym)}</b> <span style="color:var(--muted)">${esc((s.names || {})[o.sym] || "")}</span></td>
+      <td style="white-space:normal;color:var(--muted)">${esc(o.reason)}</td></tr>`).join("") ||
+    `<tr><td style="color:var(--muted)">No changes planned.</td></tr>`;
+
+  $("sc-top-h").textContent = `Strongest trends in the market (top ${(s.top || []).length} of ${s.passed || 0} that passed every filter)`;
+  $("sc-top").innerHTML = `<tr><th>#</th><th>Stock</th><th>Sector</th><th>Price</th><th>Last 90 days</th><th>Smoothness</th><th>Of 52-wk high</th><th></th></tr>` +
+    (s.top || []).map(r => `<tr><td>${r.rank}</td><td><b>${esc(r.sym)}</b> <span style="color:var(--muted)">${esc(r.name)}</span></td>
+      <td style="color:var(--muted)">${esc(r.sector)}</td><td>${money(r.price)}</td><td class="up">${pct(r.gain90, 0)}</td>
+      <td>${r.smooth.toFixed(2)}</td><td>${Math.round(r.of_high * 100)}%</td>
+      <td>${r.held ? '<span class="badge">owned</span>' : ""}</td></tr>`).join("");
+
+  const days = Object.entries(s.days || {}).sort((x, y) => x[0] < y[0] ? 1 : -1);
+  $("sc-days").innerHTML = `<tr><th>Day</th><th>Scanner</th><th>Day change</th><th>S&amp;P 500 (SPY)</th><th>If you held SPY</th><th>Scanner vs SPY</th></tr>` +
+    (days.map(([d, [eq, spy]], k) => {
+      const prev = days[k + 1] ? days[k + 1][1][0] : start;
+      const hold = s.start_spy ? start * spy / s.start_spy : null;
+      return `<tr><td>${dayLabel(d)}</td><td>${money(eq)}</td><td class="${eq >= prev ? "up" : "down"}">${signed(eq - prev)}</td>
+        <td>${money(spy)}</td><td>${hold ? money(hold) : "-"}</td><td class="${eq >= hold ? "up" : "down"}">${hold ? signed(eq - hold) : "-"}</td></tr>`;
+    }).join("") || `<tr><td colspan="6" style="color:var(--muted)">The first row appears after its first trading day.</td></tr>`);
+  $("sc-log").innerHTML = (s.log || []).slice().reverse().map(([t, m]) =>
+    `<div><span>${new Date(t * 1000).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"})}</span>${esc(m)}</div>`).join("");
+  $("sc-trades").innerHTML = `<tr><th>Date</th><th>Side</th><th>Stock</th><th>Price</th><th>Result</th><th>Why</th></tr>` +
+    (b.trades.slice().reverse().map(x => `<tr><td>${dayLabel(x.date)}</td><td class="${x.side === "BUY" ? "up" : "down"}">${x.side}</td>
+      <td><b>${esc(x.sym)}</b></td><td>${money(x.price)}</td>
+      <td class="${(x.pnl || 0) >= 0 ? "up" : "down"}">${x.pnl == null ? "" : `${signed(x.pnl)} (${pct(x.ret)})`}</td>
+      <td style="white-space:normal;color:var(--muted)">${esc(x.reason)}</td></tr>`).join("") ||
+     `<tr><td colspan="6" style="color:var(--muted)">No trades yet.</td></tr>`);
+}
+
+async function loadScannerBacktest() {
+  $("sc-bt-msg").textContent = HOSTED ? "loading..." : "running (the first time takes a couple of minutes)...";
+  const r = await api("/api/scanner_backtest").catch(() => ({error: "Could not load"}));
+  if (r.error) { $("sc-bt-msg").innerHTML = `<span class="err">${esc(r.error)}</span>`; return; }
+  scBt = r;
+  drawScannerBacktest();
+}
+
+function drawScannerBacktest() {
+  const k = $("sc-bt-pick").value, T = scBt.tests[k];
+  if (!T) return;
+  const ymd = d => new Date(d + "T12:00").toLocaleDateString([], {year: "numeric", month: "short", day: "numeric"});
+  $("sc-bt-msg").textContent = `${T.stocks.toLocaleString()} stocks, ${ymd(T.start)} to ${ymd(T.end)}. ` +
+    `${T.trades} trades, ${T.win_rate}% winners.`;
+  const rows = [["scanner", "Scanner (these rules)"], ["spy", "S&P 500 (SPY)"], ["equal_weight", "Equal-weight, same stocks"]];
+  const cols = [["total", "Total return", "%"], ["cagr", "Per year", "%"], ["maxdd", "Worst drop", "%"],
+                ["worst_year", "Worst calendar year", "%"], ["sharpe", "Sharpe", ""], ["final", "$10k became", "$"]];
+  $("sc-bt-table").innerHTML = `<tr><th></th>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr>` +
+    rows.map(([key, label]) => `<tr><td><b>${label}</b></td>${cols.map(([c, , u]) => {
+      const v = T.stats[key][c];
+      return `<td>${v == null ? "-" : u === "$" ? money(v) : Number(v).toLocaleString() + u}</td>`;
+    }).join("")}</tr>`).join("");
+  const labels = T.curves.scanner.map(x => x[0]);
+  const ds = [lineDs("Scanner", T.curves.scanner.map(x => x[1]), "#3fb950", {borderWidth: 2.5}),
+              lineDs("S&P 500", T.curves.spy.map(x => x[1]), "#8b949e"),
+              lineDs("Equal-weight, same stocks", T.curves.equal_weight.map(x => x[1]), "#d29922")];
+  if (scChart) scChart.destroy();
+  scChart = new Chart($("c-scbt"), {type: "line", data: {labels, datasets: ds},
+    options: {animation: false, maintainAspectRatio: false, interaction: {mode: "index", intersect: false},
+              scales: {y: {type: "logarithmic"}, x: {ticks: {maxTicksLimit: 8}}}, plugins: {legend: {labels: {boxWidth: 10}}}}});
+}
+$("sc-bt-pick").onchange = () => scBt && drawScannerBacktest();
 
 async function loadRules() {
   try {

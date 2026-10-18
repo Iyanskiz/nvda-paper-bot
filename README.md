@@ -12,6 +12,28 @@ Open http://localhost:8765. Other stocks or crypto: `python bot.py --symbol AMD`
 
 Print a 10-year backtest table without the dashboard: `python bot.py --backtest --symbol NVDA`
 
+## Stock scanner (whole market)
+
+`scanner.py` is a second paper account ($10,000) that picks stocks from the entire US market:
+
+1. Each weekday morning it pulls all ~7,000 NYSE/Nasdaq/AMEX stocks from Nasdaq and keeps ~2,100 real companies
+   (market cap $2B+, price $5+).
+2. It ranks them by how fast and how steadily they climbed over 90 trading days (Clenow: regression slope x R^2).
+3. Filters: above the 100-day average, within 25% of the 52-week high, no 15%+ one-day jumps, enough volume.
+4. It holds the top 10 equally, only buys while the S&P 500 is above its 200-day average, sells the morning after a
+   holding closes below its 100-day average, and fully rebalances every 4 weeks.
+
+Backtests (`python scanner.py --backtest`), $10,000 start, 0.05% cost per trade:
+
+| Test | Scanner | S&P 500 | Equal-weight, same stocks |
+|---|---|---|---|
+| ~2,100 stocks, Oct 2022 to Oct 2026 | 28.9%/yr, worst drop -27% | 18.6%/yr, -19% | 22.2%/yr, -20% |
+| 600 biggest, Oct 2017 to Oct 2026 | 32.6%/yr, worst drop -26% | 12.9%/yr, -34% | 17.8%/yr, -38% |
+
+These use today's stock list, which leaves out companies that collapsed, so all numbers are too rosy. The fair test
+is the equal-weight column, which has the same bias. Weekly rebalancing earned much less (12%/yr in the first test),
+and trailing stops hurt in both tests.
+
 ## Running in the cloud (GitHub Actions + Pages)
 
 `.github/workflows/bot.yml` runs `python bot.py --tick` every 10 minutes on weekdays during market hours.

@@ -772,31 +772,39 @@ def _slim(obj):
     return obj
 
 
+def _save_json(out, name, data):
+    with open(os.path.join(out, name), "w") as f:
+        json.dump(_slim(data), f, separators=(",", ":"))
+
+
+def _build_sim(task):
+    """One simulator file plus, for seed 1, the matching Monte Carlo summary. Runs in a worker process."""
+    import sim
+    symbol, out, sc, wk, st, seed = task
+    bars = sim.generate(symbol, wk * 5, sc, seed)
+    _save_json(out, f"sim_{sc}_{wk}_{seed}_{st}.json",
+               dict(sim.fast_replay(bars, st, symbol), scenario=sc, seed=seed, weeks=wk))
+    if seed == SIM_SEEDS[0]:
+        _save_json(out, f"mc_{sc}_{wk}_{st}.json", sim.monte_carlo(sc, st, 200, wk * 5, symbol))
+
+
 def build_static(symbol, out):
     """Pre-compute everything the Simulator and Backtest tabs ask the local server for, as files,
     so the hosted (GitHub Pages) dashboard works without a server. Names match staticUrl() in dashboard.html."""
     import sim
+    from concurrent.futures import ProcessPoolExecutor
     os.makedirs(out, exist_ok=True)
-
-    def save(name, data):
-        with open(os.path.join(out, name), "w") as f:
-            json.dump(_slim(data), f, separators=(",", ":"))
-
     t0 = time.time()
     for iv, rngs in RANGES.items():
         for rng in rngs:
-            save(f"backtest_{iv}_{rng}.json", backtest_report(symbol, rng, iv))
+            _save_json(out, f"backtest_{iv}_{rng}.json", backtest_report(symbol, rng, iv))
     for iv in REPLAY_RANGE:
         for st in STRATEGIES:
-            save(f"replay_{iv}_{st}.json", replay_report(symbol, iv, st))
-    for sc in sim.SCENARIOS:
-        for wk in SIM_WEEKS:
-            for st in STRATEGIES:
-                for seed in SIM_SEEDS:
-                    bars = sim.generate(symbol, wk * 5, sc, seed)
-                    save(f"sim_{sc}_{wk}_{seed}_{st}.json", dict(sim.fast_replay(bars, st, symbol),
-                                                                 scenario=sc, seed=seed, weeks=wk))
-                save(f"mc_{sc}_{wk}_{st}.json", sim.monte_carlo(sc, st, 200, wk * 5, symbol))
+            _save_json(out, f"replay_{iv}_{st}.json", replay_report(symbol, iv, st))
+    tasks = [(symbol, out, sc, wk, st, seed) for sc in sim.SCENARIOS for wk in SIM_WEEKS
+             for st in STRATEGIES for seed in SIM_SEEDS]
+    with ProcessPoolExecutor() as pool:  # ~400 simulations: use every CPU core
+        list(pool.map(_build_sim, tasks, chunksize=4))
     with open(os.path.join(out, "built.json"), "w") as f:
         json.dump(dict(built_at=int(time.time()), seeds=list(SIM_SEEDS)), f)
     print(f"{fmt(time.time())} static files built in {time.time() - t0:.0f}s")

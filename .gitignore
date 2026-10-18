@@ -6,3 +6,4 @@ __pycache__/
 *.vbs
 *.cmd
 .claude/
+.vercel/

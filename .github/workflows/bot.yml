@@ -1,17 +1,17 @@
-# Runs the paper-trading bot in the cloud and publishes the dashboard to GitHub Pages.
-# Every 10 minutes on weekdays from 9am to 5:55pm New York time (covers both EDT and EST).
-# The bot catches up on any 5-minute bars it missed, so late or skipped runs are fine.
+# Runs the NVDA bot and the stock scanner in the cloud.
+# Every 5 minutes on weekdays from 9am to 5:55pm New York time (covers both EDT and EST).
+# Each run: trade, save the accounts to main, push the live numbers to the "data" branch (the dashboard reads them
+# from there). The dashboard page itself is only republished when its code changes or once a day with fresh
+# Simulator/Backtest data, which keeps us far under GitHub Pages' publish limit.
 name: paper-bot
 
 on:
   schedule:
-    - cron: "*/10 13-21 * * 1-5"
+    - cron: "*/5 13-21 * * 1-5"
   workflow_dispatch:
-
-permissions:
-  contents: write   # save state.json back to the repo
-  pages: write      # publish the dashboard
-  id-token: write
+  push:
+    branches: [main]
+    paths: [dashboard.html, bot.py, scanner.py, sim.py, .github/workflows/bot.yml]
 
 concurrency:
   group: paper-bot
@@ -21,9 +21,10 @@ jobs:
   tick:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+    permissions:
+      contents: write   # save the accounts, publish live data
+    outputs:
+      deploy: ${{ steps.should.outputs.deploy }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,10 +48,10 @@ jobs:
           path: docs/static
           key: static-v2-${{ steps.date.outputs.day }}
 
-      - name: Run the bot once
+      - name: Run the NVDA bot once
         run: python bot.py --tick
 
-      # Scans every US stock once each morning, trades at the open, then just watches its holdings.
+      # Scans every US stock once each morning, trades at the open, then checks its holdings every run.
       - name: Run the stock scanner once
         run: python scanner.py --tick
 
@@ -60,22 +61,51 @@ jobs:
           python bot.py --build-static
           python scanner.py --build-static
 
-      - name: Save the paper account
+      - name: Save the paper accounts
         run: |
           git config user.name "paper-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add state.json scanner_state.json
           if git diff --cached --quiet; then
-            echo "no new bars, nothing to save"
+            echo "nothing changed"
           else
             git commit -m "bot: $(date -u +'%Y-%m-%d %H:%M') UTC"
             git pull --rebase --quiet
             git push
           fi
 
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      # One commit, force-pushed each run, so this branch never grows.
+      - name: Publish live numbers to the data branch
+        run: |
+          mkdir -p /tmp/data && cp docs/live.json docs/scanner.json /tmp/data/
+          cd /tmp/data
+          git init -q -b data
+          git config user.name "paper-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A && git commit -q -m "live data $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data
+
+      - name: Republish the page?
+        id: should
+        run: echo "deploy=${{ steps.static.outputs.cache-hit != 'true' || github.event_name != 'schedule' }}" >> "$GITHUB_OUTPUT"
+
+      - if: steps.should.outputs.deploy == 'true'
+        uses: actions/configure-pages@v5
+      - if: steps.should.outputs.deploy == 'true'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: docs
+
+  deploy:
+    needs: tick
+    if: needs.tick.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
         uses: actions/deploy-pages@v4

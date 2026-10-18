@@ -350,6 +350,9 @@ def live_tick(p=PARAMS, out_dir=None):
         ranks = decide(book, P, ind, t, p, force_rebalance=first)
         regime = bool(ind["regime"].iloc[t])
         st["atr"] = {o["sym"]: float(ind["atr"][o["sym"]].iloc[t]) for o in book["pending"] if o["side"] == "BUY"}
+        # the 100-day average each holding has to stay above (checked every run, acted on at the close)
+        watch = set(book["pos"]) | {o["sym"] for o in book["pending"] if o["side"] == "BUY"}
+        st["sell_line"] = {s: round(float(ind["ma"][s].iloc[t]), 4) for s in watch if np.isfinite(ind["ma"][s].iloc[t])}
         st.update(last_scan=today, scan_date=P["C"].index[t], regime=regime, universe_size=len(uni),
                   passed=len(ranks), spy_close=float(P["C"]["SPY"].iloc[t]), spy_ma=float(ind["spy_ma"].iloc[t]))
         rows = []
@@ -387,6 +390,28 @@ def live_tick(p=PARAMS, out_dir=None):
         if s in prices:
             h["last"] = prices[s]
     eq = equity_of(book, prices)
+
+    # the 5-minute check: where every holding stands against its sell line, and what the bot will do
+    rows, warn = [], []
+    for s, h in book["pos"].items():
+        line = st.get("sell_line", {}).get(s)
+        px = prices.get(s, h["last"])
+        room = px / line - 1 if line else None
+        if room is not None and room < 0:
+            warn.append(s)
+        rows.append(dict(sym=s, price=round(px, 2), line=line, room=round(room, 4) if room is not None else None))
+    if not _market_open(now):
+        verdict = ("Market closed. " + (f"{len(book['pending'])} orders ready for the next open."
+                                         if book["pending"] else "Nothing planned for the open."))
+    elif not book["pos"]:
+        verdict = "No holdings yet. " + ("Waiting for the market trend to turn up before buying."
+                                         if not st.get("regime") else "Buys happen at the next scan's rebalance.")
+    elif warn:
+        verdict = (f"{', '.join(warn)} below the sell line right now. If still below at the 4pm close, "
+                   f"it's sold at tomorrow's open. Everything else: hold.")
+    else:
+        verdict = f"All {len(book['pos'])} holdings above their sell lines. Decision: hold."
+    st["check"] = dict(t=int(time.time()), verdict=verdict, rows=rows)
     if live.get("SPY") and now.weekday() < 5 and now.hour >= 9:
         book["equity"].append([int(time.time()), round(eq, 2)])
         book["equity"] = book["equity"][-20000:]

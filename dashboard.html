@@ -177,6 +177,7 @@
       <div class="card kpi"><div class="l">Scanned / passed</div><div class="v" id="sc-scanned">-</div></div>
     </div>
     <div class="card" style="margin-bottom:12px">
+      <div id="sc-check" style="font-weight:600;margin-bottom:10px"></div>
       <h2>What it owns</h2>
       <div class="wide"><table id="sc-hold"></table></div>
       <h2 style="margin-top:14px">Orders for the next open</h2>
@@ -354,9 +355,17 @@ function staticUrl(path, q) {
   }
   throw new Error("not available on the hosted page");
 }
+// The cloud job pushes fresh live numbers to this branch every 5 minutes (the page itself is republished rarely).
+const DATA_BASE = "https://raw.githubusercontent.com/Iyanskiz/nvda-paper-bot/data/";
 async function api(path, q = {}) {
   let url = HOSTED ? staticUrl(path, q) : path + (Object.keys(q).length ? "?" + new URLSearchParams(q) : "");
-  if (HOSTED && (path === "/api/live" || path === "/api/scanner")) url += "?t=" + Date.now();  // skip CDN caches
+  if (HOSTED && (path === "/api/live" || path === "/api/scanner")) {
+    try {  // newest numbers first; fall back to the copy published with the page
+      const r = await fetch(DATA_BASE + url + "?t=" + Date.now(), {cache: "no-store"});
+      if (r.ok) return await r.json();
+    } catch (e) { /* use the page copy */ }
+    url += "?t=" + Date.now();
+  }
   const r = await fetch(url, {cache: "no-store"});
   const body = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
   if (!r.ok && !body.error) body.error = `HTTP ${r.status}`;
@@ -723,15 +732,21 @@ async function loadScanner() {
   $("sc-scanned").textContent = `${(s.universe_size || 0).toLocaleString()} / ${s.passed || 0}`;
 
   const held = Object.entries(b.pos).sort((x, y) => (y[1].last / y[1].entry) - (x[1].last / x[1].entry));
-  $("sc-hold").innerHTML = `<tr><th>Stock</th><th>Bought</th><th>Price now</th><th>Gain</th><th>Value</th><th>Status today</th><th>Why it was bought</th></tr>` +
+  const chk = s.check || {};
+  const lines = Object.fromEntries((chk.rows || []).map(r => [r.sym, r]));
+  $("sc-check").innerHTML = chk.verdict ? `Latest check (${new Date(chk.t * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}): ${esc(chk.verdict)}` : "";
+  $("sc-check").className = /below the sell line/.test(chk.verdict || "") ? "down" : "";
+  $("sc-hold").innerHTML = `<tr><th>Stock</th><th>Bought</th><th>Price now</th><th>Gain</th><th>Value</th><th title="100-day average: a close below it means sell at the next open">Sell line</th><th>Room</th><th>Status at last scan</th><th>Why it was bought</th></tr>` +
     (held.map(([sym, h]) => {
       const g = h.last / h.entry - 1;
       return `<tr><td><b>${esc(sym)}</b> <span style="color:var(--muted)">${esc((s.names || {})[sym] || "")}</span></td>
         <td>${dayLabel(h.date)} @ ${money(h.entry)}</td><td>${money(h.last)}</td>
         <td class="${g >= 0 ? "up" : "down"}">${pct(g)}</td><td>${money(h.shares * h.last)}</td>
+        <td>${lines[sym] && lines[sym].line ? money(lines[sym].line) : "-"}</td>
+        <td class="${(lines[sym]?.room ?? 0) >= 0 ? "up" : "down"}">${lines[sym]?.room != null ? pct(lines[sym].room) : "-"}</td>
         <td style="white-space:normal">${esc((s.holding_status || {})[sym] || "")}</td>
         <td style="white-space:normal;color:var(--muted)">${esc(h.reason)}</td></tr>`;
-    }).join("") || `<tr><td colspan="7" style="color:var(--muted)">Nothing yet${s.regime ? "" : ": the market trend is down, so it's waiting in cash"}.</td></tr>`);
+    }).join("") || `<tr><td colspan="9" style="color:var(--muted)">Nothing yet${s.regime ? "" : ": the market trend is down, so it's waiting in cash"}.</td></tr>`);
   $("sc-pending").innerHTML = (b.pending || []).map(o => `<tr><td class="${o.side === "BUY" ? "up" : "down"}">${o.side}</td>
       <td><b>${esc(o.sym)}</b> <span style="color:var(--muted)">${esc((s.names || {})[o.sym] || "")}</span></td>
       <td style="white-space:normal;color:var(--muted)">${esc(o.reason)}</td></tr>`).join("") ||
@@ -814,7 +829,7 @@ if (HOSTED) {
     $(id).value = "NVDA"; $(id).disabled = true;
     $(id).title = "The hosted page has NVDA only. Run bot.py on your PC to try other symbols.";
   }
-  $("live-note").textContent = "Runs on GitHub every 10 minutes during US market hours. GitHub sometimes starts runs a few " +
+  $("live-note").textContent = "Runs on GitHub every 5 minutes during US market hours. GitHub sometimes starts runs a few " +
     "minutes late; the bot catches up on any bars it missed. Simulator and Backtest data are rebuilt once a day.";
 }
 

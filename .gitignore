@@ -1,0 +1,8 @@
+# built by the cloud job, published to GitHub Pages, never committed
+docs/
+# local-only
+bot.log
+__pycache__/
+*.vbs
+*.cmd
+.claude/

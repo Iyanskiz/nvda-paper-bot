@@ -1,0 +1,71 @@
+# Runs the paper-trading bot in the cloud and publishes the dashboard to GitHub Pages.
+# Every 5 minutes on weekdays from 9am to 5:55pm New York time (covers both EDT and EST).
+# The bot catches up on any 5-minute bars it missed, so late or skipped runs are fine.
+name: paper-bot
+
+on:
+  schedule:
+    - cron: "*/5 13-21 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # save state.json back to the repo
+  pages: write      # publish the dashboard
+  id-token: write
+
+concurrency:
+  group: paper-bot
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Today's date
+        id: date
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      # Simulator and Backtest data take a few minutes to build, so build them once a day and reuse.
+      - name: Restore today's pre-built Simulator and Backtest data
+        id: static
+        uses: actions/cache@v4
+        with:
+          path: docs/static
+          key: static-${{ steps.date.outputs.day }}
+
+      - name: Run the bot once
+        run: python bot.py --tick
+
+      - name: Build Simulator and Backtest data
+        if: steps.static.outputs.cache-hit != 'true'
+        run: python bot.py --build-static
+
+      - name: Save the paper account
+        run: |
+          git config user.name "paper-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          if git diff --cached --quiet; then
+            echo "no new bars, nothing to save"
+          else
+            git commit -m "bot: $(date -u +'%Y-%m-%d %H:%M') UTC"
+            git pull --rebase --quiet
+            git push
+          fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deploy
+        uses: actions/deploy-pages@v4

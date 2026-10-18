@@ -1,11 +1,11 @@
 # Runs the paper-trading bot in the cloud and publishes the dashboard to GitHub Pages.
-# Every 5 minutes on weekdays from 9am to 5:55pm New York time (covers both EDT and EST).
+# Every 10 minutes on weekdays from 9am to 5:55pm New York time (covers both EDT and EST).
 # The bot catches up on any 5-minute bars it missed, so late or skipped runs are fine.
 name: paper-bot
 
 on:
   schedule:
-    - cron: "*/5 13-21 * * 1-5"
+    - cron: "*/10 13-21 * * 1-5"
   workflow_dispatch:
 
 permissions:

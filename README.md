@@ -14,7 +14,7 @@ Print a 10-year backtest table without the dashboard: `python bot.py --backtest 
 
 ## Running in the cloud (GitHub Actions + Pages)
 
-`.github/workflows/bot.yml` runs `python bot.py --tick` every 5 minutes on weekdays during market hours.
+`.github/workflows/bot.yml` runs `python bot.py --tick` every 10 minutes on weekdays during market hours.
 Each run catches up on finished 5-minute bars, saves the paper account to `state.json` (committed back to the repo,
 so the history is in the commit log), and publishes the dashboard to GitHub Pages. Simulator and Backtest data are
 pre-built once a day with `python bot.py --build-static`, because Pages can only serve files.

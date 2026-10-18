@@ -385,7 +385,7 @@ function lineDs(label, data, color, extra = {}) {
 
 function tradeTable(el, trades, withDate) {
   const rows = trades.slice().reverse().map(t => `<tr>
-    <td>${t.at ? ptStamp(t.at) : tlabel(t.t, withDate)}</td>
+    <td>${t.at ? ptStamp(t.at) : tlabel(t.t, withDate) + (withDate ? "" : " PT")}</td>
     <td class="${t.side === "BUY" ? "up" : "down"}">${t.side}</td>
     <td>${money(t.price)}</td><td>${t.shares}</td>
     <td class="${(t.pnl || 0) >= 0 ? "up" : "down"}">${t.pnl == null ? "" : signed(t.pnl)}</td>
@@ -600,7 +600,7 @@ async function loadMonteCarlo(scen, weeks, strat) {
 
 function rpLog(t, msg, cls = "") {
   const d = document.createElement("div");
-  d.innerHTML = `<span>${tlabel(t, rp.interval === "1d")}</span><b class="${cls}">${msg}</b>`;
+  d.innerHTML = `<span>${tlabel(t, rp.interval === "1d")}${rp.interval === "1d" ? "" : " PT"}</span><b class="${cls}">${msg}</b>`;
   $("rp-log").prepend(d);
 }
 

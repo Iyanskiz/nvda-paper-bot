@@ -253,15 +253,24 @@ const chartOpts = (log = false) => ({animation: false, maintainAspectRatio: fals
   scales: {x: {ticks: {maxTicksLimit: 8}}, y: log ? {type: "logarithmic"} : {}}, plugins: {legend: {labels: {boxWidth: 10}}}});
 
 // Live numbers come from the data branch (pushed every 5 minutes); everything else is published with the page.
-const DATA_BASE = "https://raw.githubusercontent.com/Iyanskiz/nvda-paper-bot/data/";
-async function getJSON(url) {
-  const r = await fetch(url, {cache: "no-store"});
+// The GitHub API always returns the current file; raw.githubusercontent.com can be minutes stale at some locations,
+// and the copy published with the page only updates once a day. Ask all three and show whichever is newest.
+const DATA_API = "https://api.github.com/repos/Iyanskiz/nvda-paper-bot/contents/scanner.json?ref=data";
+const DATA_RAW = "https://raw.githubusercontent.com/Iyanskiz/nvda-paper-bot/data/scanner.json";
+async function getJSON(url, headers = {}) {
+  const r = await fetch(url, {cache: "no-store", headers});
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 async function getLive() {
-  try { return await getJSON(DATA_BASE + "scanner.json?t=" + Date.now()); }
-  catch (e) { return getJSON("scanner.json?t=" + Date.now()); }
+  const tries = await Promise.allSettled([
+    getJSON(DATA_API, {Accept: "application/vnd.github.raw+json"}),  // limited to 60 requests an hour per visitor
+    getJSON(DATA_RAW + "?t=" + Date.now()),
+    getJSON("scanner.json?t=" + Date.now()),
+  ]);
+  const got = tries.filter(t => t.status === "fulfilled" && t.value && t.value.book).map(t => t.value);
+  if (!got.length) throw new Error("no data");
+  return got.reduce((a, b) => (b.updated_at || 0) > (a.updated_at || 0) ? b : a);
 }
 let STATIC = {};
 const getStatic = async name => STATIC[name] ??= await getJSON("static/" + name);
@@ -482,7 +491,7 @@ async function loadRules() {
 
 loadTrack().then(loadLive);
 loadRules();
-setInterval(loadLive, 60000);
+setInterval(loadLive, 120000);  // every 2 minutes keeps us under the GitHub API limit
 </script>
 </body>
 </html>

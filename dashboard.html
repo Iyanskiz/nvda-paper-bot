@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Paper Trading Bot</title>
+<title>Stock Scanner Bot</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root {
@@ -13,852 +13,476 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  header { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap;
            padding: 14px 20px; border-bottom: 1px solid var(--line); }
   header h1 { font-size: 18px; margin: 0; }
   .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
-  .tabs { margin-left: auto; display: flex; gap: 4px; }
+  .tabs { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; }
   .tabs button, .btn { background: var(--panel); color: var(--text); border: 1px solid var(--line);
                        padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
   .tabs button.on { background: var(--blue); color: #0d1117; border-color: var(--blue); }
+  .btn:disabled { opacity: .5; cursor: default; }
   main { padding: 16px 20px; max-width: 1300px; margin: 0 auto; }
   .grid { display: grid; gap: 12px; }
+  .grid > * { min-width: 0; }            /* cards shrink to the screen; wide tables scroll inside them */
   .kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 12px; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+  .grid .card { margin-bottom: 0; }
   .kpi .l { color: var(--muted); font-size: 12px; }
   .kpi .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-  .up { color: var(--green); } .down { color: var(--red); }
-  .two { grid-template-columns: 2fr 1fr; }
+  .up { color: var(--green); } .down { color: var(--red); } .muted { color: var(--muted); }
+  .two { grid-template-columns: 1fr 1fr; margin-bottom: 12px; }
   @media (max-width: 900px) { .two { grid-template-columns: 1fr; } }
   h2 { font-size: 14px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
-  .chart { position: relative; height: 340px; }
-  .chart.sm { height: 240px; }
+  .chart { position: relative; height: 320px; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th { color: var(--muted); font-weight: 500; font-size: 12px; }
-  .scroll { max-height: 300px; overflow: auto; }
-  .log div { padding: 3px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  td.wrap, th.wrap { white-space: normal; }
+  .scroll { max-height: 360px; overflow: auto; }
+  .wide { overflow-x: auto; }
+  .log div { padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
   .log span { color: var(--muted); margin-right: 8px; }
+  .list .item { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--line); }
+  .list .item > span:first-child { flex: none; min-width: 38px; font-weight: 600; }
+  .list .d { color: var(--muted); font-size: 13px; margin-top: 2px; }
   .hidden { display: none; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
   input, select { background: var(--panel); color: var(--text); border: 1px solid var(--line);
-                  border-radius: 6px; padding: 6px 8px; font: inherit; }
-  .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+                  border-radius: 6px; padding: 6px 8px; font: inherit; max-width: 100%; }
+  .note { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
   .err { color: var(--red); }
-  .wide { overflow-x: auto; }
-  .grid > * { min-width: 0; }            /* let cards shrink to the screen; wide tables scroll inside them */
-  select, input { max-width: 100%; }
-  .checklist .item { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--line); }
-  .checklist .item > span { flex: none; min-width: 34px; font-weight: 600; }
-  .checklist .d { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .verdict { font-weight: 600; margin-bottom: 10px; }
   @media (max-width: 600px) {
     main { padding: 12px; }
     header { padding: 12px; }
-    .tabs { margin-left: 0; flex-wrap: wrap; }
+    .tabs { margin-left: 0; }
     .kpi .v { font-size: 18px; }
-    .row label { width: 100%; }
+    .chart { height: 260px; }
   }
 </style>
 </head>
 <body>
 <header>
-  <h1 id="title">Paper Trading Bots</h1>
+  <h1>Stock Scanner Bot</h1>
   <span class="badge">PAPER MONEY ONLY</span>
-  <span class="badge" id="status">connecting...</span>
+  <span class="badge" id="status">loading...</span>
   <div class="tabs">
-    <button data-tab="scan" class="on">Stock scanner</button>
-    <button data-tab="live">NVDA bot</button>
-    <button data-tab="replay">Simulator</button>
+    <button data-tab="live" class="on">Live portfolio</button>
+    <button data-tab="sim">Simulator</button>
     <button data-tab="bt">Backtest</button>
     <button data-tab="how">How it works</button>
   </div>
 </header>
 
 <main>
-  <!-- LIVE -->
-  <section id="live" class="hidden">
+  <!-- LIVE PORTFOLIO -->
+  <section id="live">
+    <p class="note" id="lv-msg" style="margin:0 0 10px"></p>
     <div class="grid kpis">
-      <div class="card kpi"><div class="l">Price</div><div class="v" id="k-price">-</div></div>
-      <div class="card kpi"><div class="l">Equity</div><div class="v" id="k-eq">-</div></div>
-      <div class="card kpi"><div class="l">P&amp;L</div><div class="v" id="k-pnl">-</div></div>
-      <div class="card kpi"><div class="l">Position</div><div class="v" id="k-pos">-</div></div>
-      <div class="card kpi"><div class="l">Stop</div><div class="v" id="k-stop">-</div></div>
-      <div class="card kpi"><div class="l" id="k-hold-l">vs. just holding NVDA</div><div class="v" id="k-hold">-</div></div>
-      <div class="card kpi"><div class="l">Signal</div><div class="v" id="k-sig">-</div></div>
+      <div class="card kpi"><div class="l">Account value</div><div class="v" id="lv-eq">-</div></div>
+      <div class="card kpi"><div class="l">Profit / loss</div><div class="v" id="lv-pnl">-</div></div>
+      <div class="card kpi"><div class="l" id="lv-vs-l">vs. same $10k in the S&amp;P 500</div><div class="v" id="lv-vs">-</div></div>
+      <div class="card kpi"><div class="l">Holdings</div><div class="v" id="lv-n">-</div></div>
+      <div class="card kpi"><div class="l">Market trend</div><div class="v" id="lv-regime">-</div></div>
+      <div class="card kpi"><div class="l">Stocks scanned / passed</div><div class="v" id="lv-scanned">-</div></div>
     </div>
-    <div class="card" style="margin-bottom:12px">
-      <h2>Bot brain: what it's checking right now</h2>
-      <div class="v" id="brain-decision" style="font-size:20px;font-weight:600;margin-bottom:6px">-</div>
-      <div id="brain" class="checklist"></div>
+    <div class="card">
+      <div class="verdict" id="lv-check"></div>
+      <h2>Account vs. the S&amp;P 500</h2>
+      <div class="chart"><canvas id="c-live"></canvas></div>
+      <p class="note" id="lv-chart-note"></p>
     </div>
-    <div class="grid two">
-      <div class="card">
-        <h2>5-minute price, 20/50/200 SMA, trades</h2>
-        <div class="chart"><canvas id="c-price"></canvas></div>
-      </div>
-      <div class="card">
-        <h2>Bot log</h2>
-        <div class="scroll log" id="log"></div>
-        <div class="row" style="margin-top:10px">
-          <button class="btn" id="reset">Reset paper account</button>
-        </div>
-      </div>
-    </div>
-    <div class="card" style="margin-top:12px">
-      <h2>Day by day</h2>
-      <div class="scroll wide"><table id="days"></table></div>
-    </div>
-    <div class="grid two" style="margin-top:12px">
-      <div class="card">
-        <h2>Paper equity</h2>
-        <div class="chart sm"><canvas id="c-eq"></canvas></div>
-      </div>
-      <div class="card">
-        <h2>Trades</h2>
-        <div class="scroll"><table id="trades"></table></div>
-      </div>
-    </div>
-    <p class="note" id="live-note">Checks Yahoo Finance every 60 seconds and acts only on finished 5-minute bars.
-      Outside US market hours (9:30am-4pm ET, weekdays) no new bars arrive, so the bot waits.</p>
-  </section>
-
-  <!-- REPLAY -->
-  <section id="replay" class="hidden">
-    <div class="row">
-      <select id="rp-src">
-        <option value="sim:bull" selected>Simulated market: bull</option>
-        <option value="sim:choppy">Simulated market: choppy</option>
-        <option value="sim:bear">Simulated market: bear</option>
-        <option value="sim:history">Simulated market: reshuffled real days</option>
-        <option value="real">Real past data</option>
-      </select>
-      <select id="rp-weeks" class="simonly">
-        <option value="2">2 weeks</option><option value="4" selected>4 weeks</option>
-        <option value="6">6 weeks</option><option value="8">8 weeks</option>
-      </select>
-      <button class="btn simonly" id="rp-new">New random market</button>
-      <label class="realonly">Symbol <input id="rp-sym" value="NVDA" size="9"></label>
-      <select id="rp-iv" class="realonly">
-        <option value="5m" selected>5-minute bars (last month)</option>
-        <option value="1h">1-hour bars (last 6 months)</option>
-        <option value="1d">Daily bars (last 2 years)</option>
-      </select>
-      <select id="rp-strat"></select>
-      <button class="btn" id="rp-load">Load</button>
-      <button class="btn" id="rp-play">Play</button>
-      <button class="btn" id="rp-step">Step</button>
-      <label>Speed <input id="rp-speed" type="range" min="1" max="60" value="15"></label>
-    </div>
-    <div class="grid kpis">
-      <div class="card kpi"><div class="l">Bar time</div><div class="v" id="rp-time" style="font-size:16px">-</div></div>
-      <div class="card kpi"><div class="l">Price</div><div class="v" id="rp-price">-</div></div>
-      <div class="card kpi"><div class="l">Equity</div><div class="v" id="rp-eq">-</div></div>
-      <div class="card kpi"><div class="l">vs. just holding</div><div class="v" id="rp-vs">-</div></div>
-      <div class="card kpi"><div class="l">Position</div><div class="v" id="rp-pos">-</div></div>
-      <div class="card kpi"><div class="l">Closed trades</div><div class="v" id="rp-n">-</div></div>
-    </div>
-    <div class="card simonly" id="rp-mc" style="margin-bottom:12px"></div>
-    <div class="grid two">
-      <div class="card">
-        <h2>What the bot sees, bar by bar</h2>
-        <div class="chart"><canvas id="c-rp"></canvas></div>
-        <input id="rp-scrub" type="range" min="0" max="0" value="0" style="width:100%;margin-top:8px">
-      </div>
-      <div class="card">
-        <h2>Bot thinking</h2>
-        <div class="scroll log" id="rp-log" style="max-height:380px"></div>
-      </div>
-    </div>
-    <p class="note"><b>Simulated markets</b> are built from real NVDA 5-minute trading days from the last 60 days, stitched
-      together in a random order (same intraday swings, overnight gaps and volume), with a trend added for bull or bear.
-      The live bot's own code trades them with a simulated clock. "New random market" builds a different one.<br>
-      <b>Real past data</b> replays real past bars through the exact same code the live bot runs. Each bar the bot
-      checks its stop, then its exit rule, then (if flat) its entry rule. Green triangles are buys, red are sells,
-      the dotted red line is the stop.</p>
-  </section>
-
-  <!-- STOCK SCANNER -->
-  <section id="scan">
-    <p class="note" id="sc-msg" style="margin-top:0"></p>
-    <div class="grid kpis">
-      <div class="card kpi"><div class="l">Scanner account</div><div class="v" id="sc-eq">-</div></div>
-      <div class="card kpi"><div class="l">P&amp;L</div><div class="v" id="sc-pnl">-</div></div>
-      <div class="card kpi"><div class="l" id="sc-vs-l">vs. S&amp;P 500</div><div class="v" id="sc-vs">-</div></div>
-      <div class="card kpi"><div class="l">Holdings</div><div class="v" id="sc-n">-</div></div>
-      <div class="card kpi"><div class="l">Market trend</div><div class="v" id="sc-regime">-</div></div>
-      <div class="card kpi"><div class="l">Scanned / passed</div><div class="v" id="sc-scanned">-</div></div>
-    </div>
-    <div class="card" style="margin-bottom:12px">
-      <div id="sc-check" style="font-weight:600;margin-bottom:10px"></div>
+    <div class="card">
       <h2>What it owns</h2>
-      <div class="wide"><table id="sc-hold"></table></div>
-      <h2 style="margin-top:14px">Orders for the next open</h2>
-      <div id="sc-pending" class="checklist"></div>
+      <div class="wide"><table id="lv-hold"></table></div>
     </div>
-    <div class="card" style="margin-bottom:12px">
-      <h2 id="sc-top-h">Strongest trends in the market</h2>
-      <div class="scroll wide" style="max-height:420px"><table id="sc-top"></table></div>
+    <div class="card">
+      <h2>Orders for the next open</h2>
+      <div class="list" id="lv-pending"></div>
+    </div>
+    <div class="card">
+      <h2 id="lv-top-h">Strongest trends in the market today</h2>
+      <p class="note" style="margin:0 0 8px">The bot's prediction is its ranking. The last column is the real track record: how
+        stocks at that rank did over the following month across 9 years of history.</p>
+      <div class="scroll wide"><table id="lv-top"></table></div>
     </div>
     <div class="grid two">
       <div class="card">
         <h2>Day by day vs. the S&amp;P 500</h2>
-        <div class="scroll wide"><table id="sc-days"></table></div>
+        <div class="scroll wide"><table id="lv-days"></table></div>
       </div>
       <div class="card">
-        <h2>Scanner log</h2>
-        <div class="scroll log" id="sc-log"></div>
+        <h2>Bot log</h2>
+        <div class="scroll log" id="lv-log"></div>
       </div>
     </div>
-    <div class="card" style="margin-top:12px">
-      <h2>Trades</h2>
-      <div class="scroll wide"><table id="sc-trades"></table></div>
+    <div class="card">
+      <h2>Every trade</h2>
+      <div class="scroll wide"><table id="lv-trades"></table></div>
     </div>
-    <div class="card" style="margin-top:12px">
-      <h2>Would it have worked? Backtest of the exact same rules</h2>
-      <div class="row">
-        <select id="sc-bt-pick">
-          <option value="all_5y">All ~2,100 tradeable US stocks, last 4 years</option>
-          <option value="big600_10y">600 biggest companies, last 9 years (incl. 2020 and 2022 sell-offs)</option>
-        </select>
-        <span class="note" id="sc-bt-msg"></span>
+  </section>
+
+  <!-- SIMULATOR -->
+  <section id="sim" class="hidden">
+    <div class="row">
+      <select id="sm-kind">
+        <option value="bull">Bull market (rising)</option>
+        <option value="choppy">Choppy market (sideways)</option>
+        <option value="bear">Bear market (falling)</option>
+      </select>
+      <select id="sm-months">
+        <option value="1">1 month</option><option value="3" selected>3 months</option><option value="6">6 months</option>
+      </select>
+      <button class="btn" id="sm-next">Another real period</button>
+      <button class="btn" id="sm-play">Play</button>
+      <button class="btn" id="sm-step">Next day</button>
+      <label class="muted">Speed <input id="sm-speed" type="range" min="1" max="20" value="6"></label>
+    </div>
+    <p class="note" id="sm-about" style="margin:0 0 10px"></p>
+    <div class="grid kpis">
+      <div class="card kpi"><div class="l">Day</div><div class="v" id="sm-day" style="font-size:16px">-</div></div>
+      <div class="card kpi"><div class="l">Bot's account</div><div class="v" id="sm-eq">-</div></div>
+      <div class="card kpi"><div class="l">Same $10k in the S&amp;P 500</div><div class="v" id="sm-spy">-</div></div>
+      <div class="card kpi"><div class="l">Bot vs. S&amp;P 500</div><div class="v" id="sm-vs">-</div></div>
+      <div class="card kpi"><div class="l">Holdings</div><div class="v" id="sm-n">-</div></div>
+      <div class="card kpi"><div class="l">Market trend</div><div class="v" id="sm-regime">-</div></div>
+    </div>
+    <div class="card">
+      <h2>Bot vs. the market, day by day</h2>
+      <div class="chart"><canvas id="c-sim"></canvas></div>
+      <input id="sm-scrub" type="range" min="0" max="0" value="0" style="width:100%;margin-top:8px">
+    </div>
+    <div class="grid two">
+      <div class="card">
+        <h2>What it owns that day</h2>
+        <div class="wide"><table id="sm-hold"></table></div>
+        <h2 style="margin-top:14px">Plan for the next open</h2>
+        <div class="list" id="sm-plan"></div>
       </div>
-      <div class="wide"><table id="sc-bt-table"></table></div>
-      <div class="chart" style="margin-top:10px"><canvas id="c-scbt"></canvas></div>
-      <p class="note"><b>Honest caveat:</b> these tests use today's list of stocks, which leaves out companies that went
-        bankrupt or shrank. That makes every result look better than reality. The equal-weight row holds every stock on the
-        same list, so it has the same bias: the fair test is whether the scanner beats that row, not just the S&amp;P 500.</p>
+      <div class="card">
+        <h2>Its predictions that day (top 10)</h2>
+        <div class="wide"><table id="sm-preds"></table></div>
+      </div>
     </div>
-    <div class="card" style="margin-top:12px">
-      <h2>How it picks</h2>
-      <ol>
-        <li>Every weekday morning it pulls the full list of ~7,000 US stocks from Nasdaq and keeps real companies
-          (worth $2B+, priced $5+, about 2,100 stocks).</li>
-        <li>It scores each one by how fast <i>and</i> how steadily it has climbed over the last 90 trading days
-          (Clenow's trend slope x smoothness; steady climbers keep going more often than one-day spikes).</li>
-        <li>It skips stocks below their 100-day average, more than 25% under their 52-week high, that jumped 15%+ in a
-          day recently, or that trade too little.</li>
-        <li>It only buys while the S&amp;P 500 is above its 200-day average. In a falling market it buys nothing new.</li>
-        <li>It holds the top <span class="p-n">10</span> in equal amounts. It sells a stock the morning after it closes below its
-          100-day average (the trend broke), and at each rebalance (every <span class="p-w">4</span> weeks) it swaps out anything
-          that fell out of the top <span class="p-x">20</span>.</li>
-        <li>It decides after the close and trades at the next open, paying 0.05% per trade, like a real account.</li>
-      </ol>
+    <div class="grid two">
+      <div class="card">
+        <h2>Trades so far</h2>
+        <div class="scroll log" id="sm-log"></div>
+      </div>
+      <div class="card">
+        <h2>Is this period typical?</h2>
+        <div id="sm-summary"></div>
+      </div>
     </div>
+    <p class="note">These are <b>real past markets</b> from the last 9 years (the 600 biggest US companies), picked by how the
+      S&amp;P 500 behaved. The bot only sees prices up to each day, the same as live, so it has to predict which stocks keep
+      rising. It starts with $10,000, decides after each close and trades at the next open.</p>
   </section>
 
   <!-- BACKTEST -->
   <section id="bt" class="hidden">
-    <div class="row">
-      <label>Symbol <input id="bt-sym" value="NVDA" size="9"></label>
-      <select id="bt-iv">
-        <option value="1d" selected>Daily bars</option>
-        <option value="1h">1-hour bars (2 years)</option>
-        <option value="5m">5-minute bars (60 days)</option>
-      </select>
-      <select id="bt-range">
-        <option value="2y">2 years</option><option value="5y">5 years</option>
-        <option value="10y" selected>10 years</option>
-      </select>
-      <button class="btn" id="bt-run">Run backtest</button>
-      <span class="note" id="bt-msg"></span>
-    </div>
-    <div class="card wide" style="margin-bottom:12px"><table id="bt-table"></table></div>
     <div class="card">
-      <h2>Equity from $10,000 (log scale)</h2>
-      <div class="chart"><canvas id="c-bt"></canvas></div>
+      <h2>Would it have worked? The exact live rules on past data</h2>
+      <div class="row">
+        <select id="bt-pick">
+          <option value="all_5y">All ~2,100 tradeable US stocks, last 4 years</option>
+          <option value="big600_10y">600 biggest companies, last 9 years (incl. 2018, 2020, 2022 sell-offs)</option>
+        </select>
+        <span class="note" id="bt-msg" style="margin:0"></span>
+      </div>
+      <div class="wide"><table id="bt-table"></table></div>
+      <div class="chart" style="margin-top:10px"><canvas id="c-bt"></canvas></div>
     </div>
-    <div class="card" style="margin-top:12px">
-      <h2>Trades for <select id="bt-pick"></select></h2>
-      <div class="scroll"><table id="bt-trades"></table></div>
+    <div class="card">
+      <h2>How good are its predictions? Next-month results by rank</h2>
+      <div class="wide"><table id="bt-preds"></table></div>
+      <p class="note">Its top picks rose about as <i>often</i> as an average stock, but rose <i>more</i> on average: the edge is
+        bigger winners, not a crystal ball.</p>
     </div>
+    <div class="grid two">
+      <div class="card"><h2>Best trades</h2><div class="wide"><table id="bt-best"></table></div></div>
+      <div class="card"><h2>Worst trades</h2><div class="wide"><table id="bt-worst"></table></div></div>
+    </div>
+    <p class="note"><b>Honest caveat:</b> these tests use today's list of stocks, which leaves out companies that went
+      bankrupt or shrank, so every result looks better than reality. The equal-weight row holds every stock on the same list
+      and has the same bias: the fair test is beating that row, not just the S&amp;P 500.</p>
   </section>
 
-  <!-- HOW -->
+  <!-- HOW IT WORKS -->
   <section id="how" class="hidden">
-    <div class="card" style="margin-bottom:12px">
-      <h2>What the bot knows: advice from traders and research, and what survived testing</h2>
+    <div class="card">
+      <h2>How it picks, buys and sells</h2>
+      <ol>
+        <li><b>Scan:</b> every weekday morning it pulls the full list of ~7,000 US stocks and keeps ~2,100 real companies.</li>
+        <li><b>Predict:</b> it scores each by how fast and how steadily it climbed over 90 trading days. Steady climbers tend to keep going.</li>
+        <li><b>Invest:</b> it buys the 7 strongest in equal amounts, but only while the S&amp;P 500 is above its 200-day average.</li>
+        <li><b>Wait:</b> when the overall market is falling it buys nothing new and keeps cash.</li>
+        <li><b>Sell and move on:</b> the morning after a holding closes below its 100-day average it sells, and won't buy that
+          stock again for 90 days. Every 4 weeks it also swaps out anything that dropped out of the top 14.</li>
+        <li><b>Watch:</b> it checks every holding every 5 minutes during market hours and trades at real prices.</li>
+      </ol>
       <p class="note" id="reality"></p>
-      <div class="wide"><table id="rules"></table></div>
-      <p class="note">Every rule was tested on hundreds of simulated NVDA markets and on real data from 6-12 stocks
-        (including ones that crashed). Rules marked "dropped" sounded good but made the bot worse.</p>
     </div>
     <div class="card">
-      <h2>Two strategies, side by side</h2>
-      <p><b>Plain</b> is the assignment: buy when the 20-bar average crosses above the 50-bar average
-        (golden cross), sell when it crosses back below (death cross). All in, no stop.</p>
-      <p><b>200-day trend</b> is what the live NVDA bot runs now. It stays invested while NVDA closed above its 200-day
-        average the day before, sells at the next open after a close below it, and steps aside around earnings reports.
-        It was picked because it made the most money in rising markets (8-week simulations: +16% typical vs +8% for Swing)
-        and on real data, at the cost of deeper losses when NVDA falls.</p>
-      <p><b>Swing</b> (the previous live strategy) buys when NVDA closes above its highest price of the last 2 trading days
-        (156 five-minute bars) and sells on a close below the last 1-day low, or if a wide trailing stop (12x ATR, about 3-4% below the peak) is hit.
-        It was picked because it held up in hundreds of simulated markets; the faster settings traded too often and lost to costs.</p>
-      <p><b>Smart crossover</b> keeps the assignment's crossover and adds the risk rules from the playbook:</p>
-      <ul>
-        <li><b>Trend filter</b>: only buy when price is above the 200-bar average, so it sits out bear markets.</li>
-        <li><b>RSI guard</b>: skip entries when RSI(14) is above 75 (already overheated).</li>
-        <li><b>ATR stop</b>: initial stop 2.5x the average true range below entry.</li>
-        <li><b>Trailing stop</b>: stop ratchets up to 5x ATR below the highest price since entry. It never moves down.</li>
-        <li><b>Volatility sizing</b>: position is sized so hitting the stop loses at most 10% of the account, capped at 100% (no leverage).
-          In calm markets that means full size, when the stock goes wild it buys less.</li>
-        <li><b>Costs</b>: 0.05% per trade for commission and slippage.</li>
-      </ul>
-      <p><b>The honest part:</b> on stocks that went up 10x or more (NVDA, AMD), nothing here beats just
-        buying and holding. Timing rules spend time out of the market and miss big up days. What the smart
-        rules buy you is smaller drawdowns. Check the Backtest tab and compare Max drawdown and Sharpe,
-        not only total return. Also: backtesting only on a stock we already know was a huge winner flatters any long-only strategy.</p>
-    </div>
-    <div class="card" style="margin-top:12px">
-      <h2>How to make it better (what the tests showed)</h2>
-      <p>I tested four strategies on NVDA, AMD, SPY, AAPL, MSFT and TSLA on 5-minute, 1-hour and daily bars,
-        splitting each history in half so a rule had to work in both halves.</p>
-      <ol>
-        <li><b>Timeframe matters more than the indicator.</b> On 5-minute bars every strategy lost money after costs on most stocks.
-          On daily bars every strategy made money in both halves on most stocks. Short bars are mostly noise.</li>
-        <li><b>Costs eat fast bots alive.</b> The smart bot made about 70 trades in 60 days on 5-minute bars. At 0.05% per side
-          that is roughly 7% of the account, which turned small wins into losses on 5 of 6 stocks.</li>
-        <li><b>Pullback buying is the best risk-adjusted rule on daily bars.</b> Buying short dips (RSI(2) under 10) while above
-          the 200-day average and selling the bounce gave NVDA about 13% a year with a -19% worst drop, while sitting in cash 88% of the time.</li>
-        <li><b>Breakouts beat crossovers on most stocks</b> on daily bars, with smaller drawdowns, because they react faster to new highs.</li>
-        <li><b>Nothing beat buy-and-hold on big winners.</b> The rules earn their keep in crashes (TSLA second half: holding fell 72% at worst, pullback 32%).</li>
-      </ol>
-      <p>Next steps that would help most: trade daily signals but check stops every 5 minutes, test on stocks that went down too
-        (not only winners), and combine pullback plus breakout so the bot has something to do in both quiet and trending markets.</p>
+      <h2>What the bot knows: research and what survived testing</h2>
+      <div class="wide"><table id="rules"></table></div>
     </div>
   </section>
 </main>
 
 <script>
 const $ = id => document.getElementById(id);
-const money = v => v == null ? "-" : "$" + Number(v).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-// Every time on the page is Pacific, whatever timezone the viewer's device is in.
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const money = v => v == null || !isFinite(v) ? "-" : "$" + Number(v).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const signed = v => (v < 0 ? "-" : "+") + money(Math.abs(v));
+const pct = (v, d = 1) => v == null || !isFinite(v) ? "-" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(d)}%`;
+// every time on the page is Pacific, whatever timezone the viewer's device is in
 const TZ = "America/Los_Angeles";
-const ptTime = (t, opts = {}) => new Date(t * 1000).toLocaleString("en-US", Object.assign({timeZone: TZ}, opts));
-const ptStamp = t => ptTime(t, {weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit"}) + " PT";
-const tlabel = (t, withDate) => {
-  const d = new Date(t * 1000);
-  return withDate ? d.toLocaleDateString("en-US", {timeZone: TZ})
-                  : d.toLocaleString("en-US", {timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
-};
+const ptStamp = t => new Date(t * 1000).toLocaleString("en-US", {timeZone: TZ, weekday: "short", month: "short", day: "numeric",
+  hour: "numeric", minute: "2-digit", second: "2-digit"}) + " PT";
+const ptShort = t => new Date(t * 1000).toLocaleString("en-US", {timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
+const dayLabel = d => new Date(d + "T12:00").toLocaleDateString("en-US", {weekday: "short", month: "short", day: "numeric"});
+const ymd = d => new Date(d + "T12:00").toLocaleDateString("en-US", {year: "numeric", month: "short", day: "numeric"});
+const cls = v => v >= 0 ? "up" : "down";
 Chart.defaults.color = "#8b949e";
 Chart.defaults.borderColor = "#30363d";
-Chart.defaults.font.family = "system-ui, sans-serif";
+const line = (label, data, color, extra = {}) => Object.assign({label, data, borderColor: color, backgroundColor: color,
+  borderWidth: 1.5, pointRadius: 0, tension: 0, spanGaps: true}, extra);
+const chartOpts = (log = false) => ({animation: false, maintainAspectRatio: false, interaction: {mode: "index", intersect: false},
+  scales: {x: {ticks: {maxTicksLimit: 8}}, y: log ? {type: "logarithmic"} : {}}, plugins: {legend: {labels: {boxWidth: 10}}}});
+
+// Live numbers come from the data branch (pushed every 5 minutes); everything else is published with the page.
+const DATA_BASE = "https://raw.githubusercontent.com/Iyanskiz/nvda-paper-bot/data/";
+async function getJSON(url) {
+  const r = await fetch(url, {cache: "no-store"});
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+async function getLive() {
+  try { return await getJSON(DATA_BASE + "scanner.json?t=" + Date.now()); }
+  catch (e) { return getJSON("scanner.json?t=" + Date.now()); }
+}
+let STATIC = {};
+const getStatic = async name => STATIC[name] ??= await getJSON("static/" + name);
 
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
-  ["live", "replay", "scan", "bt", "how"].forEach(id => $(id).classList.toggle("hidden", id !== b.dataset.tab));
-  if (b.dataset.tab === "scan") loadScanner();
-  if (b.dataset.tab === "bt" && !btLoaded) runBacktest();
-  if (b.dataset.tab === "replay" && !rp) loadReplay();
+  for (const id of ["live", "sim", "bt", "how"]) $(id).classList.toggle("hidden", id !== b.dataset.tab);
+  if (b.dataset.tab === "sim" && !SIM.frames) loadSim();
+  if (b.dataset.tab === "bt" && !BT) loadBacktest();
 });
 
-let priceChart, eqChart, btChart, btLoaded = false;
-const names = {trend: "200-day trend (live bot)", swing: "Swing breakout", plain: "Plain crossover", smart: "Smart crossover", breakout: "Breakout",
-               pullback: "Pullback", hold: "Buy and hold"};
-const COLORS = {hold: "#8b949e", plain: "#d29922", smart: "#3fb950", breakout: "#58a6ff", pullback: "#bc8cff", swing: "#ff7b72", trend: "#56d4dd"};
-const STRATS = ["trend", "swing", "smart", "plain", "breakout", "pullback"];
-
-// Hosted on GitHub Pages there is no server: every API call maps to a file the cloud job pre-builds.
-const HOSTED = !["localhost", "127.0.0.1", ""].includes(location.hostname);
-function staticUrl(path, q) {
-  switch (path) {
-    case "/api/live": return "live.json";
-    case "/api/rules": return "rules.json";
-    case "/api/backtest": {
-      const rng = q.interval === "1d" ? q.range : q.interval === "1h" ? "730d" : "60d";
-      return `static/backtest_${q.interval}_${rng}.json`;
-    }
-    case "/api/replay": return `static/replay_${q.interval}_${q.strategy}.json`;
-    case "/api/sim": return `static/sim_${q.scenario}_${q.weeks}_${q.seed}_${q.strategy}.json`;
-    case "/api/montecarlo": return `static/mc_${q.scenario}_${q.weeks}_${q.strategy}.json`;
-    case "/api/scanner": return "scanner.json";
-    case "/api/scanner_backtest": return "static/scanner_backtest.json";
-  }
-  throw new Error("not available on the hosted page");
+// ---------------------------------------------------------------- prediction track record (from the 9-year test)
+let TRACK = null;
+async function loadTrack() {
+  try { TRACK = (await getStatic("scanner_backtest.json")).tests.big600_10y.predictions; } catch (e) { TRACK = null; }
 }
-// The cloud job pushes fresh live numbers to this branch every 5 minutes (the page itself is republished rarely).
-const DATA_BASE = "https://raw.githubusercontent.com/Iyanskiz/nvda-paper-bot/data/";
-async function api(path, q = {}) {
-  let url = HOSTED ? staticUrl(path, q) : path + (Object.keys(q).length ? "?" + new URLSearchParams(q) : "");
-  if (HOSTED && (path === "/api/live" || path === "/api/scanner")) {
-    try {  // newest numbers first; fall back to the copy published with the page
-      const r = await fetch(DATA_BASE + url + "?t=" + Date.now(), {cache: "no-store"});
-      if (r.ok) return await r.json();
-    } catch (e) { /* use the page copy */ }
-    url += "?t=" + Date.now();
-  }
-  const r = await fetch(url, {cache: "no-store"});
-  const body = await r.json().catch(() => ({error: `HTTP ${r.status}`}));
-  if (!r.ok && !body.error) body.error = `HTTP ${r.status}`;
-  return body;
-}
-const signed = v => (v < 0 ? "-" : "+") + money(Math.abs(v));
-
-function lineDs(label, data, color, extra = {}) {
-  return Object.assign({label, data, borderColor: color, backgroundColor: color, borderWidth: 1.5,
-                        pointRadius: 0, tension: 0, spanGaps: true}, extra);
+function trackFor(rank) {
+  if (!TRACK) return "";
+  const k = rank <= 7 ? "Top 7 (what it buys)" : rank <= 25 ? "Ranked 8-25" : rank <= 100 ? "Ranked 26-100" : "Passed filters, ranked lower";
+  const b = TRACK.buckets[k], avg = TRACK.buckets["Average stock"];
+  return b ? `rose ${Math.round(b.up)}% of months, avg ${b.avg >= 0 ? "+" : ""}${b.avg.toFixed(1)}% (avg stock ${avg.avg >= 0 ? "+" : ""}${avg.avg.toFixed(1)}%)` : "";
 }
 
-function tradeTable(el, trades, withDate) {
-  const rows = trades.slice().reverse().map(t => `<tr>
-    <td>${t.at ? ptStamp(t.at) : tlabel(t.t, withDate) + (withDate ? "" : " PT")}</td>
-    <td class="${t.side === "BUY" ? "up" : "down"}">${t.side}</td>
-    <td>${money(t.price)}</td><td>${t.shares}</td>
-    <td class="${(t.pnl || 0) >= 0 ? "up" : "down"}">${t.pnl == null ? "" : signed(t.pnl)}</td>
-    <td style="color:var(--muted)">${t.reason}</td></tr>`).join("");
-  el.innerHTML = `<tr><th>Time</th><th>Side</th><th>Price</th><th>Shares</th><th>P&amp;L</th><th>Why</th></tr>` +
-    (rows || `<tr><td colspan="6" style="color:var(--muted)">No trades yet</td></tr>`);
-}
-
-async function refreshLive() {
+// ---------------------------------------------------------------- live portfolio
+let liveChart = null;
+async function loadLive() {
   let s;
-  try {
-    s = await api("/api/live");
-    if (!s.bars) throw new Error(s.error);
-  } catch (e) {
-    $("status").textContent = HOSTED ? "no bot data yet" : "server offline"; $("status").className = "badge err"; return;
-  }
-  // the page covers the whole-market scanner and the NVDA bot, so keep the general title
-  const when = s.updated_at ? new Date(s.updated_at * 1000) : new Date();
-  $("status").textContent = s.error ? "data error: " + s.error
-    : (HOSTED ? "bot last ran " : "updated ") + ptStamp(when.getTime() / 1000);
-  $("status").className = "badge" + (s.error ? " err" : "");
-  $("bt-sym").placeholder = s.symbol;
-
-  const px = s.quote || (s.bars.length ? s.bars.at(-1).c : null);
-  $("k-price").textContent = money(px);
-  $("k-eq").textContent = money(s.equity_now);
-  const pnl = s.equity_now - s.start_cash;
-  $("k-pnl").textContent = (pnl >= 0 ? "+" : "") + money(pnl).replace("$-", "-$");
-  $("k-pnl").className = "v " + (pnl >= 0 ? "up" : "down");
-  $("k-pos").textContent = s.shares > 0 ? `${s.shares.toFixed(2)} sh` : "Flat";
-  $("k-stop").textContent = s.stop ? money(s.stop) : "-";
-  if (s.hold_now) {
-    const d = s.equity_now - s.hold_now;
-    $("k-hold").textContent = (d >= 0 ? "+" : "-") + money(Math.abs(d));
-    $("k-hold").className = "v " + (d >= 0 ? "up" : "down");
-    $("k-hold-l").textContent = `vs. holding NVDA since ${tlabel(s.start_t, true)} (${money(s.hold_now)})`;
-  }
-
-  const n = s.bars.length - 1;
-  let sig = "-";
-  if (n > 0 && s.fast[n] != null && s.slow[n] != null) {
-    const up = s.fast[n] > s.slow[n], trendOk = s.trend[n] == null || s.bars[n].c > s.trend[n];
-    sig = up && trendOk ? "Bullish" : up ? "Up, below 200" : "Bearish";
-    $("k-sig").className = "v " + (up && trendOk ? "up" : "down");
-  }
-  $("k-sig").textContent = sig;
-
-  const labels = s.bars.map(b => tlabel(b.t));
-  const idx = new Map(s.bars.map((b, i) => [b.t, i]));
-  const buys = labels.map(() => null), sells = labels.map(() => null);
-  s.trades.forEach(t => { const i = idx.get(t.t); if (i != null) (t.side === "BUY" ? buys : sells)[i] = t.price; });
-  const ds = [
-    lineDs("Price", s.bars.map(b => b.c), "#e6edf3"),
-    lineDs("SMA 20", s.fast, "#58a6ff"),
-    lineDs("SMA 50", s.slow, "#d29922"),
-    lineDs("SMA 200", s.trend, "#bc8cff", {borderDash: [4, 3]}),
-    lineDs("Buy", buys, "#3fb950", {showLine: false, pointRadius: 7, pointStyle: "triangle"}),
-    lineDs("Sell", sells, "#f85149", {showLine: false, pointRadius: 7, pointStyle: "triangle", rotation: 180}),
-  ];
-  if (s.stop) ds.push(lineDs("Stop", labels.map(() => s.stop), "#f85149", {borderDash: [2, 4], borderWidth: 1}));
-  if (!priceChart) {
-    priceChart = new Chart($("c-price"), {type: "line", data: {labels, datasets: ds},
-      options: {animation: false, maintainAspectRatio: false, interaction: {mode: "index", intersect: false},
-                scales: {x: {ticks: {maxTicksLimit: 8}}}, plugins: {legend: {labels: {boxWidth: 10}}}}});
-  } else { priceChart.data.labels = labels; priceChart.data.datasets = ds; priceChart.update(); }
-
-  const eqLabels = s.equity.map(e => tlabel(e[0]));
-  const eqData = [lineDs("Equity", s.equity.map(e => e[1]), "#3fb950", {fill: true, backgroundColor: "rgba(63,185,80,.08)"})];
-  if (!eqChart) {
-    eqChart = new Chart($("c-eq"), {type: "line", data: {labels: eqLabels, datasets: eqData},
-      options: {animation: false, maintainAspectRatio: false, plugins: {legend: {display: false}},
-                scales: {x: {ticks: {maxTicksLimit: 6}}}}});
-  } else { eqChart.data.labels = eqLabels; eqChart.data.datasets = eqData; eqChart.update(); }
-
-  tradeTable($("trades"), s.trades, false);
-  const days = Object.entries(s.days || {}).sort((x, y) => x[0] < y[0] ? 1 : -1);
-  $("days").innerHTML = `<tr><th>Day</th><th>Bot account</th><th>Day change</th><th>NVDA close</th>
-      <th>If you just held NVDA</th><th>Bot vs holding</th></tr>` + (days.map(([d, [eq, close]], k) => {
-    const prev = days[k + 1] ? days[k + 1][1][0] : s.start_cash;
-    const hold = s.start_price ? s.start_cash * close / s.start_price : null;
-    const cls = v => v >= 0 ? "up" : "down";
-    return `<tr><td>${new Date(d + "T12:00").toLocaleDateString([], {weekday: "short", month: "short", day: "numeric"})}</td>
-      <td>${money(eq)}</td><td class="${cls(eq - prev)}">${signed(eq - prev)}</td><td>${money(close)}</td>
-      <td>${hold ? money(hold) : "-"}</td><td class="${cls(eq - hold)}">${hold ? signed(eq - hold) : "-"}</td></tr>`;
-  }).join("") || `<tr><td colspan="6" style="color:var(--muted)">The first row appears after the bot's first trading day (Monday).</td></tr>`);
-  if (s.brain) {
-    const d = s.brain.decision;
-    $("brain-decision").textContent = d;
-    const short = d.split(/[ :]/)[0];
-    $("k-sig").textContent = short.charAt(0) + short.slice(1).toLowerCase();
-    $("k-sig").className = "v " + (short === "READY" || short === "HOLDING" ? "up" : short === "WAITING" ? "" : "down");
-    $("brain-decision").className = d.startsWith("READY") || d.startsWith("HOLDING") ? "up" : d.startsWith("WAITING") ? "" : "down";
-    $("brain").innerHTML = s.brain.rows.map(r => `<div class="item"><span class="${r.ok ? "up" : "down"}">${r.ok ? "&#10003;" : "&#10007;"}</span>
-      <div><b>${esc(r.rule)}</b><div class="d">${esc(r.detail)}</div></div></div>`).join("");
-  }
-  $("log").innerHTML = s.log.slice().reverse().map(([t, m]) =>
-    `<div><span>${ptStamp(t)}</span>${m}</div>`).join("") ||
-    `<div style="color:var(--muted)">Waiting for first data...</div>`;
-}
-
-$("reset").onclick = async () => {
-  if (!confirm("Reset the paper account to $10,000 and clear its trades?")) return;
-  await fetch("/api/reset", {method: "POST"}); refreshLive();
-loadScanner();
-setInterval(() => { if (!$("scan").classList.contains("hidden")) loadScanner(); }, 60000);
-};
-
-let btReq = 0;
-async function runBacktest() {
-  btLoaded = true;
-  const my = ++btReq;  // ignore answers to older requests if the user changed settings meanwhile
-  const sym = ($("bt-sym").value || "NVDA").trim().toUpperCase();
-  $("bt-msg").textContent = "running...";
-  let r;
-  try {
-    r = await api("/api/backtest", {symbol: sym, interval: $("bt-iv").value, range: $("bt-range").value});
-  } catch (e) { $("bt-msg").textContent = "failed"; return; }
-  if (my !== btReq) return;
-  if (r.error) { $("bt-msg").innerHTML = `<span class="err">${r.error}</span>`; return; }
-  const daily = r.interval === "1d";
-  $("bt-msg").textContent = `${r.symbol}, ${tlabel(r.start, true)} to ${tlabel(r.end, true)} (${$("bt-iv").selectedOptions[0].text})`;
-  btData = r;
-
-  const cols = [["total_return", "Total return", "%"], ["cagr", "CAGR", "%"], ["max_drawdown", "Max drawdown", "%"],
-                ["sharpe", "Sharpe", ""], ["trades", "Trades", ""], ["win_rate", "Win rate", "%"],
-                ["profit_factor", "Profit factor", ""], ["exposure", "Time in market", "%"], ["final_equity", "Final $", "$"]];
-  const fmt = (v, u) => v == null ? "-" : u === "$" ? money(v) : Number(v).toLocaleString() + u;
-  $("bt-table").innerHTML = `<tr><th></th>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr>` +
-    Object.entries(r.runs).map(([k, run]) => `<tr><td><b>${names[k]}</b></td>${
-      cols.map(([key, , u]) => `<td>${fmt(run.metrics[key], u)}</td>`).join("")}</tr>`).join("");
-
-  const labels = r.runs.hold.equity.map(e => tlabel(e[0], daily));
-  const ds = Object.keys(r.runs).map(k => lineDs(names[k], r.runs[k].equity.map(e => e[1]), COLORS[k],
-                                                  k === "trend" ? {borderWidth: 2.5} : {}));
-  if (btChart) btChart.destroy();
-  btChart = new Chart($("c-bt"), {type: "line", data: {labels, datasets: ds},
-    options: {animation: false, maintainAspectRatio: false, interaction: {mode: "index", intersect: false},
-              scales: {y: {type: "logarithmic"}, x: {ticks: {maxTicksLimit: 10}}},
-              plugins: {legend: {labels: {boxWidth: 10}}}}});
-  const pick = $("bt-pick");
-  if (!pick.options.length) pick.innerHTML = STRATS.map(k => `<option value="${k}">${names[k]}</option>`).join("");
-  showBtTrades();
-}
-let btData;
-function showBtTrades() {
-  if (btData) tradeTable($("bt-trades"), btData.runs[$("bt-pick").value].trades, btData.interval === "1d");
-}
-$("bt-pick").onchange = showBtTrades;
-$("bt-run").onclick = runBacktest;
-$("bt-iv").onchange = () => { $("bt-range").disabled = $("bt-iv").value !== "1d"; runBacktest(); };
-
-// ---------------------------------------------------------------- replay
-let rp = null, rpI = 0, rpTimer = null, rpChart = null, lastWhy = null;
-const WIN = 160;  // bars visible on the replay chart
-$("rp-strat").innerHTML = STRATS.map(k => `<option value="${k}">${names[k]}</option>`).join("");
-
-async function loadReplay() {
-  stopReplay();
-  $("rp-log").innerHTML = `<div style="color:var(--muted)">Loading...</div>`;
-  const sym = ($("rp-sym").value || "NVDA").trim().toUpperCase();
-  const src = $("rp-src").value, isSim = src.startsWith("sim:"), strat = $("rp-strat").value;
-  const scen = src.slice(4), weeks = $("rp-weeks").value;
-  const my = ++rpReq;
-  let r;
-  try {
-    r = isSim ? await api("/api/sim", {scenario: scen, weeks, seed: rpSeed, strategy: strat})
-              : await api("/api/replay", {symbol: sym, interval: $("rp-iv").value, strategy: strat});
-  } catch (e) { $("rp-log").innerHTML = `<div class="err">Could not load data</div>`; return; }
-  if (my !== rpReq) return;
-  if (r.error) { $("rp-log").innerHTML = `<div class="err">${r.error}</div>`; return; }
-  rp = r;
-  if (isSim) loadMonteCarlo(scen, weeks, strat);
-  rp.eqAt = new Map(r.equity.map(e => [e[0], e[1]]));
-  rp.tradeAt = new Map(r.trades.map(t => [t.t, t]));
-  rpI = r.start; lastWhy = null;
-  $("rp-scrub").min = r.start; $("rp-scrub").max = r.bars.length - 1;
-  $("rp-log").innerHTML = "";
-  rpLog(r.bars[r.start].t, isSim
-    ? `Simulated ${r.weeks}-week ${scen} market #${r.seed} (${r.bars.length - r.start - 1} five-minute bars after 5 days of warm-up history). Starting with $10,000. Press Play.`
-    : `Loaded ${r.bars.length} bars of ${r.symbol}. The first 200 are warm-up so the 200-bar average exists. Starting with $10,000. Press Play.`);
-  drawReplay();
-}
-
-let rpSeed = 5, rpReq = 0;  // seed 5: a typical bull run, close to the median result
-// hosted: the cloud job pre-builds markets 1-5, so cycle through those; locally any seed works
-$("rp-new").onclick = () => { rpSeed = HOSTED ? rpSeed % 5 + 1 : Math.floor(Math.random() * 100000); loadReplay(); };
-$("rp-src").onchange = () => { syncRpControls(); loadReplay(); };
-$("rp-weeks").onchange = loadReplay;
-function syncRpControls() {
-  const isSim = $("rp-src").value.startsWith("sim:");
-  document.querySelectorAll(".simonly").forEach(e => e.classList.toggle("hidden", !isSim));
-  document.querySelectorAll(".realonly").forEach(e => e.classList.toggle("hidden", isSim));
-}
-syncRpControls();
-
-async function loadMonteCarlo(scen, weeks, strat) {
-  const box = $("rp-mc");
-  box.innerHTML = `<span class="note">Running 200 more simulated ${scen} markets to see if this result is typical...</span>`;
-  const my = rpReq;
-  const m = await api("/api/montecarlo", {scenario: scen, weeks, strategy: strat}).catch(() => ({error: "Could not load"}));
-  if (my !== rpReq) return;
-  if (m.error) { box.innerHTML = `<span class="err">${m.error}</span>`; return; }
-  const pct = v => `${v > 0 ? "+" : ""}${v}%`;
-  box.innerHTML = `<h2>Is this run typical? 200 different simulated ${scen} markets, ${m.weeks} weeks each</h2>
-    <div class="grid kpis" style="margin:0">
-      <div class="kpi"><div class="l">Bot made money</div><div class="v ${m.profitable >= 50 ? "up" : "down"}">${m.profitable}% of runs</div></div>
-      <div class="kpi"><div class="l">Typical result</div><div class="v ${m.median >= 0 ? "up" : "down"}">${pct(m.median)}</div></div>
-      <div class="kpi"><div class="l">Bad case (1 in 10)</div><div class="v down">${pct(m.p10)}</div></div>
-      <div class="kpi"><div class="l">Good case (1 in 10)</div><div class="v up">${pct(m.p90)}</div></div>
-      <div class="kpi"><div class="l">Just holding NVDA</div><div class="v">${pct(m.hold_median)}</div></div>
-      <div class="kpi"><div class="l">Beat holding</div><div class="v">${m.beat_hold}% of runs</div></div>
-    </div>`;
-}
-
-function rpLog(t, msg, cls = "") {
-  const d = document.createElement("div");
-  d.innerHTML = `<span>${tlabel(t, rp.interval === "1d")}${rp.interval === "1d" ? "" : " PT"}</span><b class="${cls}">${msg}</b>`;
-  $("rp-log").prepend(d);
-}
-
-function explain(i) {
-  // why the bot is doing nothing, in plain words
-  const b = rp.bars[i], f = rp.fast[i], s = rp.slow[i], tr = rp.trend[i];
-  if (rp.held[i]) return rp.stops[i] ? "Holding. Stop is " + money(rp.stops[i]) + "." : "Holding until the death cross.";
-  if (rp.params.regime && rp.regime && rp.regime[i] === false) return "Staying out: NVDA closed below its 200-day average, the trend is broken.";
-  if (rp.params.earnings_guard && rp.earnings && rp.earnings[i]) return "Earnings day: no new buys, a report is due tonight.";
-  if (tr && b.c <= tr && rp.preset !== "plain") return "Waiting: price is under the 200-bar average, so no buying.";
-  if (rp.preset === "smart" || rp.preset === "plain")
-    return f > s ? "Waiting: fast average is above slow, but no fresh signal yet." : "Waiting: fast average is below slow.";
-  if (rp.params.kind === "breakout") return `Waiting for a close above the ${rp.params.hi_n || 20}-bar high (${money(Math.max(...rp.bars.slice(Math.max(0, i - (rp.params.hi_n || 20)), i).map(x => x.h)))}).`;
-  return "Waiting for a sharp dip (RSI(2) under 10).";
-}
-
-function advance() {
-  if (!rp || rpI >= rp.bars.length - 1) { stopReplay(); return; }
-  rpI++;
-  const b = rp.bars[rpI], t = rp.tradeAt.get(b.t);
-  if (t) {
-    const msg = t.side === "BUY"
-      ? `BUY ${t.shares} shares @ ${money(t.price)}. Reason: ${t.reason}.` + (rp.stops[rpI] ? ` Stop set at ${money(rp.stops[rpI])}.` : "")
-      : `SELL @ ${money(t.price)}. Reason: ${t.reason}. P&L ${t.pnl >= 0 ? "+" : "-"}${money(Math.abs(t.pnl))}`;
-    rpLog(b.t, msg, t.side === "BUY" ? "up" : (t.pnl >= 0 ? "up" : "down"));
-    lastWhy = null;
-  } else {
-    const why = explain(rpI);
-    // only log when the bot's reasoning changes, or the stop moves
-    const key = why.startsWith("Holding") ? "hold" + Math.round(rp.stops[rpI] || 0) : why;
-    if (key !== lastWhy) { rpLog(b.t, why); lastWhy = key; }
-  }
-  drawReplay();
-}
-
-function drawReplay() {
-  const i = rpI, lo = Math.max(0, i - WIN + 1), bars = rp.bars.slice(lo, i + 1);
-  const daily = rp.interval === "1d";
-  const sl = a => a.slice(lo, i + 1);
-  const mark = side => bars.map(b => { const t = rp.tradeAt.get(b.t); return t && t.side === side ? t.price : null; });
-  const brk = rp.params.kind === "breakout";
-  const ds = [
-    lineDs("Price", bars.map(b => b.c), "#e6edf3"),
-    ...(brk ? [
-      lineDs(`Buy level (${rp.params.hi_n || 20}-bar high)`, sl(rp.hi), "#3fb950", {borderDash: [6, 3], borderWidth: 1}),
-      lineDs(`Sell level (${rp.params.lo_n || 10}-bar low)`, sl(rp.lo), "#d29922", {borderDash: [6, 3], borderWidth: 1}),
-    ] : [
-      lineDs("SMA 20", sl(rp.fast), "#58a6ff"),
-      lineDs("SMA 50", sl(rp.slow), "#d29922"),
-      lineDs("SMA 200", sl(rp.trend), "#bc8cff", {borderDash: [4, 3]}),
-    ]),
-    lineDs("Stop", sl(rp.stops), "#f85149", {borderDash: [2, 4], borderWidth: 1.5, spanGaps: false}),
-    lineDs("Buy", mark("BUY"), "#3fb950", {showLine: false, pointRadius: 8, pointStyle: "triangle"}),
-    lineDs("Sell", mark("SELL"), "#f85149", {showLine: false, pointRadius: 8, pointStyle: "triangle", rotation: 180}),
-  ];
-  const labels = bars.map(b => tlabel(b.t, daily));
-  if (!rpChart) {
-    rpChart = new Chart($("c-rp"), {type: "line", data: {labels, datasets: ds},
-      options: {animation: false, maintainAspectRatio: false, interaction: {mode: "index", intersect: false},
-                scales: {x: {ticks: {maxTicksLimit: 8}}}, plugins: {legend: {labels: {boxWidth: 10}}}}});
-  } else { rpChart.data.labels = labels; rpChart.data.datasets = ds; rpChart.update(); }
-
-  const b = rp.bars[i];
-  const eq = rp.eqAt.get(b.t) ?? 10000;
-  const hold = 10000 * b.c / rp.bars[rp.start].c;
-  $("rp-time").textContent = tlabel(b.t, daily);
-  $("rp-price").textContent = money(b.c);
-  $("rp-eq").textContent = money(eq);
-  $("rp-eq").className = "v " + (eq >= 10000 ? "up" : "down");
-  const diff = eq - hold;
-  $("rp-vs").textContent = (diff >= 0 ? "+" : "-") + money(Math.abs(diff));
-  $("rp-vs").className = "v " + (diff >= 0 ? "up" : "down");
-  $("rp-pos").textContent = rp.held[i] ? "Long" : "Flat";
-  $("rp-n").textContent = rp.trades.filter(t => t.t <= b.t && t.side === "SELL").length;
-  $("rp-scrub").value = i;
-}
-
-function stopReplay() { clearInterval(rpTimer); rpTimer = null; $("rp-play").textContent = "Play"; }
-$("rp-play").onclick = () => {
-  if (rpTimer) return stopReplay();
-  if (!rp) return;
-  if (rpI >= rp.bars.length - 1) { rpI = rp.start; lastWhy = null; $("rp-log").innerHTML = ""; }
-  $("rp-play").textContent = "Pause";
-  rpTimer = setInterval(advance, 1000 / Number($("rp-speed").value));
-};
-$("rp-speed").oninput = () => { if (rpTimer) { stopReplay(); $("rp-play").click(); } };
-$("rp-step").onclick = () => { stopReplay(); advance(); };
-$("rp-load").onclick = loadReplay;
-$("rp-strat").onchange = loadReplay;
-$("rp-iv").onchange = loadReplay;
-$("rp-scrub").oninput = () => {
-  if (!rp) return;
-  stopReplay(); rpI = Number($("rp-scrub").value); lastWhy = null; drawReplay();
-};
-
-// ---------------------------------------------------------------- stock scanner
-let scBt = null, scChart = null, scReq = 0;
-const pct = (v, d = 1) => v == null || !isFinite(v) ? "-" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(d)}%`;
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-const dayLabel = d => new Date(d + "T12:00").toLocaleDateString([], {weekday: "short", month: "short", day: "numeric"});
-
-async function loadScanner() {
-  const my = ++scReq;
-  const s = await api("/api/scanner").catch(e => ({error: "Could not load the scanner"}));
-  if (my !== scReq) return;
-  if (s.params) {
-    document.querySelectorAll(".p-n").forEach(e => e.textContent = s.params.n);
-    document.querySelectorAll(".p-w").forEach(e => e.textContent = s.params.every_weeks || 1);
-    document.querySelectorAll(".p-x").forEach(e => e.textContent = s.params.n * s.params.exit_rank);
-  }
-  if (!scBt) loadScannerBacktest();
-  if (s.error || !s.book) {
-    $("sc-msg").textContent = s.error || "No scanner data yet.";
-    for (const id of ["sc-hold", "sc-pending", "sc-top", "sc-days", "sc-trades"]) $(id).innerHTML = "";
-    return;
-  }
+  try { s = await getLive(); } catch (e) { $("status").textContent = "no data yet"; $("status").className = "badge err"; return; }
+  if (!s.book) { $("lv-msg").textContent = s.error || "No data yet."; return; }
   const b = s.book, start = s.start_cash;
-  $("sc-msg").textContent = `Last scan used prices from ${dayLabel(s.scan_date)}. ` +
-    (s.updated_at ? `Last update ${ptStamp(s.updated_at)}.` : "");
-  $("sc-eq").textContent = money(s.equity_now);
+  $("status").textContent = "bot last ran " + ptStamp(s.updated_at);
+  $("status").className = "badge";
+  $("lv-msg").textContent = `Started ${dayLabel(s.start_date)} with $10,000 of paper money. Latest scan used closing prices from ${dayLabel(s.scan_date)}.`;
+  $("lv-eq").textContent = money(s.equity_now);
   const pnl = s.equity_now - start;
-  $("sc-pnl").textContent = signed(pnl); $("sc-pnl").className = "v " + (pnl >= 0 ? "up" : "down");
-  const spyNow = s.spy_now || (Object.values(s.days || {}).at(-1) || [])[1];
+  $("lv-pnl").textContent = `${signed(pnl)} (${pct(pnl / start)})`; $("lv-pnl").className = "v " + cls(pnl);
+  const spyNow = s.spy_now || s.spy_close;
   if (s.start_spy && spyNow) {
     const spyVal = start * spyNow / s.start_spy, d = s.equity_now - spyVal;
-    $("sc-vs").textContent = signed(d); $("sc-vs").className = "v " + (d >= 0 ? "up" : "down");
-    $("sc-vs-l").textContent = `vs. S&P 500 since ${dayLabel(s.start_date)} (${money(spyVal)})`;
+    $("lv-vs").textContent = signed(d); $("lv-vs").className = "v " + cls(d);
+    $("lv-vs-l").textContent = `vs. same $10k in the S&P 500 (${money(spyVal)})`;
   }
-  $("sc-n").textContent = `${Object.keys(b.pos).length} / ${s.params.n}`;
-  $("sc-regime").textContent = s.regime ? "Up" : "Down";
-  $("sc-regime").className = "v " + (s.regime ? "up" : "down");
-  $("sc-regime").title = `S&P 500 ${money(s.spy_close)} vs 200-day average ${money(s.spy_ma)}`;
-  $("sc-scanned").textContent = `${(s.universe_size || 0).toLocaleString()} / ${s.passed || 0}`;
-
-  const held = Object.entries(b.pos).sort((x, y) => (y[1].last / y[1].entry) - (x[1].last / x[1].entry));
+  $("lv-n").textContent = `${Object.keys(b.pos).length} / ${s.params.n}`;
+  $("lv-regime").textContent = s.regime ? "Up: buying" : "Down: waiting";
+  $("lv-regime").className = "v " + (s.regime ? "up" : "down");
+  $("lv-scanned").textContent = `${(s.universe_size || 0).toLocaleString()} / ${s.passed || 0}`;
   const chk = s.check || {};
-  const lines = Object.fromEntries((chk.rows || []).map(r => [r.sym, r]));
-  $("sc-check").innerHTML = chk.verdict ? `Latest check (${ptStamp(chk.t)}): ${esc(chk.verdict)}` : "";
-  $("sc-check").className = /below the sell line/.test(chk.verdict || "") ? "down" : "";
-  $("sc-hold").innerHTML = `<tr><th>Stock</th><th>Bought</th><th>Price now</th><th>Gain</th><th>Value</th><th title="100-day average: a close below it means sell at the next open">Sell line</th><th>Room</th><th>Status at last scan</th><th>Why it was bought</th></tr>` +
-    (held.map(([sym, h]) => {
-      const g = h.last / h.entry - 1;
-      return `<tr><td><b>${esc(sym)}</b> <span style="color:var(--muted)">${esc((s.names || {})[sym] || "")}</span></td>
-        <td>${dayLabel(h.date)} @ ${money(h.entry)}</td><td>${money(h.last)}</td>
-        <td class="${g >= 0 ? "up" : "down"}">${pct(g)}</td><td>${money(h.shares * h.last)}</td>
-        <td>${lines[sym] && lines[sym].line ? money(lines[sym].line) : "-"}</td>
-        <td class="${(lines[sym]?.room ?? 0) >= 0 ? "up" : "down"}">${lines[sym]?.room != null ? pct(lines[sym].room) : "-"}</td>
-        <td style="white-space:normal">${esc((s.holding_status || {})[sym] || "")}</td>
-        <td style="white-space:normal;color:var(--muted)">${esc(h.reason)}</td></tr>`;
-    }).join("") || `<tr><td colspan="9" style="color:var(--muted)">Nothing yet${s.regime ? "" : ": the market trend is down, so it's waiting in cash"}.</td></tr>`);
-  $("sc-pending").innerHTML = (b.pending || []).map(o => `<div class="item"><span class="${o.side === "BUY" ? "up" : "down"}">${o.side}</span>
-      <div><b>${esc(o.sym)}</b> <span style="color:var(--muted)">${esc((s.names || {})[o.sym] || "")}</span>
-      <div class="d">${esc(o.reason)}</div></div></div>`).join("") ||
-    `<div class="d" style="padding:6px 0">No changes planned.</div>`;
+  $("lv-check").textContent = chk.verdict ? `Latest check (${ptStamp(chk.t)}): ${chk.verdict}` : "";
+  $("lv-check").className = "verdict " + (/below the sell line/.test(chk.verdict || "") ? "down" : "");
 
-  $("sc-top-h").textContent = `Strongest trends in the market (top ${(s.top || []).length} of ${s.passed || 0} that passed every filter)`;
-  $("sc-top").innerHTML = `<tr><th>#</th><th>Stock</th><th>Sector</th><th>Price</th><th>Last 90 days</th><th>Smoothness</th><th>Of 52-wk high</th><th></th></tr>` +
-    (s.top || []).map(r => `<tr><td>${r.rank}</td><td><b>${esc(r.sym)}</b> <span style="color:var(--muted)">${esc(r.name)}</span></td>
-      <td style="color:var(--muted)">${esc(r.sector)}</td><td>${money(r.price)}</td><td class="up">${pct(r.gain90, 0)}</td>
-      <td>${r.smooth.toFixed(2)}</td><td>${Math.round(r.of_high * 100)}%</td>
-      <td>${r.held ? '<span class="badge">owned</span>' : ""}</td></tr>`).join("");
+  // account vs S&P chart
+  const pts = (b.equity || []).filter(p => p.length >= 3);
+  if (pts.length) {
+    const labels = pts.map(p => ptShort(p[0]));
+    const ds = [line("Bot's account", pts.map(p => p[1]), "#3fb950", {borderWidth: 2.5}),
+                line("Same $10k in the S&P 500", pts.map(p => start * p[2] / s.start_spy), "#8b949e")];
+    if (liveChart) { liveChart.data.labels = labels; liveChart.data.datasets = ds; liveChart.update(); }
+    else liveChart = new Chart($("c-live"), {type: "line", data: {labels, datasets: ds}, options: chartOpts()});
+    $("lv-chart-note").textContent = `${pts.length} checks so far, every 5 minutes while the market is open.`;
+  } else {
+    $("lv-chart-note").textContent = "The chart starts with the first check during market hours.";
+  }
+
+  const lines = Object.fromEntries((chk.rows || []).map(r => [r.sym, r]));
+  const held = Object.entries(b.pos).sort((x, y) => (y[1].last / y[1].entry) - (x[1].last / x[1].entry));
+  $("lv-hold").innerHTML = `<tr><th>Stock</th><th>Bought</th><th>Now</th><th>Gain</th><th>Value</th>
+      <th title="100-day average: a close below it means sell at the next open">Sell line</th><th>Room</th><th class="wrap">Why it was bought</th></tr>` +
+    (held.map(([sym, h]) => {
+      const g = h.last / h.entry - 1, L = lines[sym];
+      return `<tr><td><b>${esc(sym)}</b> <span class="muted">${esc((s.names || {})[sym] || "")}</span></td>
+        <td>${dayLabel(h.date)} @ ${money(h.entry)}</td><td>${money(h.last)}</td><td class="${cls(g)}">${pct(g)}</td>
+        <td>${money(h.shares * h.last)}</td><td>${L && L.line ? money(L.line) : "-"}</td>
+        <td class="${cls(L?.room ?? 0)}">${L?.room != null ? pct(L.room) : "-"}</td>
+        <td class="wrap muted">${esc(h.reason)}</td></tr>`;
+    }).join("") || `<tr><td colspan="8" class="muted">Nothing yet${s.regime ? ": buys happen at the next market open" : ": the market trend is down, so it's waiting in cash"}.</td></tr>`);
+  $("lv-pending").innerHTML = (b.pending || []).map(o => `<div class="item"><span class="${o.side === "BUY" ? "up" : "down"}">${o.side}</span>
+      <div><b>${esc(o.sym)}</b> <span class="muted">${esc((s.names || {})[o.sym] || "")}</span><div class="d">${esc(o.reason)}</div></div></div>`).join("") ||
+    `<div class="d muted">No changes planned.</div>`;
+
+  $("lv-top-h").textContent = `Strongest trends in the market today (top ${(s.top || []).length} of ${s.passed || 0} that passed every filter)`;
+  $("lv-top").innerHTML = `<tr><th>#</th><th>Stock</th><th>Sector</th><th>Last 90 days</th><th>Smoothness</th><th>Of 52-wk high</th><th class="wrap">Track record at this rank (next month)</th></tr>` +
+    (s.top || []).map(r => `<tr><td>${r.rank}</td><td><b>${esc(r.sym)}</b> <span class="muted">${esc(r.name)}</span> ${r.held ? '<span class="badge">owned</span>' : ""}</td>
+      <td class="muted">${esc(r.sector)}</td><td class="up">${pct(r.gain90, 0)}</td><td>${r.smooth.toFixed(2)}</td>
+      <td>${Math.round(r.of_high * 100)}%</td><td class="wrap muted">${trackFor(r.rank)}</td></tr>`).join("");
 
   const days = Object.entries(s.days || {}).sort((x, y) => x[0] < y[0] ? 1 : -1);
-  $("sc-days").innerHTML = `<tr><th>Day</th><th>Scanner</th><th>Day change</th><th>S&amp;P 500 (SPY)</th><th>If you held SPY</th><th>Scanner vs SPY</th></tr>` +
+  $("lv-days").innerHTML = `<tr><th>Day</th><th>Account</th><th>Day change</th><th>S&amp;P 500</th><th>Same $10k in S&amp;P</th><th>Bot vs S&amp;P</th></tr>` +
     (days.map(([d, [eq, spy]], k) => {
-      const prev = days[k + 1] ? days[k + 1][1][0] : start;
-      const hold = s.start_spy ? start * spy / s.start_spy : null;
-      return `<tr><td>${dayLabel(d)}</td><td>${money(eq)}</td><td class="${eq >= prev ? "up" : "down"}">${signed(eq - prev)}</td>
-        <td>${money(spy)}</td><td>${hold ? money(hold) : "-"}</td><td class="${eq >= hold ? "up" : "down"}">${hold ? signed(eq - hold) : "-"}</td></tr>`;
-    }).join("") || `<tr><td colspan="6" style="color:var(--muted)">The first row appears after its first trading day.</td></tr>`);
-  $("sc-log").innerHTML = (s.log || []).slice().reverse().map(([t, m]) =>
-    `<div><span>${ptStamp(t)}</span>${esc(m)}</div>`).join("");
-  $("sc-trades").innerHTML = `<tr><th>Date</th><th>Side</th><th>Stock</th><th>Price</th><th>Result</th><th>Why</th></tr>` +
-    (b.trades.slice().reverse().map(x => `<tr><td>${x.at ? ptStamp(x.at) : dayLabel(x.date)}</td><td class="${x.side === "BUY" ? "up" : "down"}">${x.side}</td>
-      <td><b>${esc(x.sym)}</b></td><td>${money(x.price)}</td>
-      <td class="${(x.pnl || 0) >= 0 ? "up" : "down"}">${x.pnl == null ? "" : `${signed(x.pnl)} (${pct(x.ret)})`}</td>
-      <td style="white-space:normal;color:var(--muted)">${esc(x.reason)}</td></tr>`).join("") ||
-     `<tr><td colspan="6" style="color:var(--muted)">No trades yet.</td></tr>`);
+      const prev = days[k + 1] ? days[k + 1][1][0] : start, hold = s.start_spy ? start * spy / s.start_spy : null;
+      return `<tr><td>${dayLabel(d)}</td><td>${money(eq)}</td><td class="${cls(eq - prev)}">${signed(eq - prev)}</td>
+        <td>${money(spy)}</td><td>${hold ? money(hold) : "-"}</td><td class="${cls(eq - (hold || eq))}">${hold ? signed(eq - hold) : "-"}</td></tr>`;
+    }).join("") || `<tr><td colspan="6" class="muted">The first row appears after its first trading day.</td></tr>`);
+  $("lv-log").innerHTML = (s.log || []).slice().reverse().map(([t, m]) => `<div><span>${ptStamp(t)}</span>${esc(m)}</div>`).join("");
+  $("lv-trades").innerHTML = `<tr><th>When</th><th>Side</th><th>Stock</th><th>Price</th><th>Result</th><th class="wrap">Why</th></tr>` +
+    (b.trades.slice().reverse().map(x => `<tr><td>${x.at ? ptStamp(x.at) : dayLabel(x.date)}</td>
+      <td class="${x.side === "BUY" ? "up" : "down"}">${x.side}</td><td><b>${esc(x.sym)}</b></td><td>${money(x.price)}</td>
+      <td class="${cls(x.pnl || 0)}">${x.pnl == null ? "" : `${signed(x.pnl)} (${pct(x.ret)})`}</td>
+      <td class="wrap muted">${esc(x.reason)}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No trades yet.</td></tr>`);
 }
 
-async function loadScannerBacktest() {
-  $("sc-bt-msg").textContent = HOSTED ? "loading..." : "running (the first time takes a couple of minutes)...";
-  const r = await api("/api/scanner_backtest").catch(() => ({error: "Could not load"}));
-  if (r.error) { $("sc-bt-msg").innerHTML = `<span class="err">${esc(r.error)}</span>`; return; }
-  scBt = r;
-  drawScannerBacktest();
+// ---------------------------------------------------------------- simulator (real past markets)
+const SIM = {index: null, frames: null, i: 0, run: 0, timer: null, chart: null};
+async function loadSim(nextRun = false) {
+  stopSim();
+  try { SIM.index ??= await getStatic("scansim_index.json"); }
+  catch (e) { $("sm-about").innerHTML = `<span class="err">Simulator data isn't built yet.</span>`; return; }
+  const key = `${$("sm-kind").value}_${$("sm-months").value}`, entry = SIM.index[key];
+  if (!entry || !entry.runs.length) { $("sm-about").textContent = "No real period of this type and length in the last 9 years."; return; }
+  SIM.run = nextRun ? (SIM.run + 1) % entry.runs.length : 0;
+  const run = entry.runs[SIM.run];
+  const data = await getStatic(run.file);
+  SIM.frames = data.frames; SIM.i = 0; SIM.entry = entry;
+  $("sm-about").innerHTML = `Real period ${SIM.run + 1} of ${entry.runs.length}: <b>${ymd(run.start)} to ${ymd(run.end)}</b> (${esc(entry.about)}). ` +
+    `The bot only sees data up to each day.`;
+  $("sm-scrub").max = SIM.frames.length - 1;
+  const sm = entry.summary;
+  $("sm-summary").innerHTML = sm ? `<p>Across all <b>${sm.windows}</b> real ${$("sm-months").value}-month ${entry.kind} periods since 2017:</p>
+    <div class="grid kpis" style="margin:0">
+      <div class="kpi"><div class="l">Bot made money</div><div class="v ${sm.profitable >= 50 ? "up" : "down"}">${sm.profitable}%</div></div>
+      <div class="kpi"><div class="l">Beat the S&amp;P 500</div><div class="v ${sm.beat_spy >= 50 ? "up" : "down"}">${sm.beat_spy}%</div></div>
+      <div class="kpi"><div class="l">Typical result</div><div class="v ${cls(sm.median)}">${sm.median > 0 ? "+" : ""}${sm.median}%</div></div>
+      <div class="kpi"><div class="l">Bad case (1 in 10)</div><div class="v down">${sm.p10}%</div></div>
+      <div class="kpi"><div class="l">Good case (1 in 10)</div><div class="v up">${sm.p90 > 0 ? "+" : ""}${sm.p90}%</div></div>
+    </div>` : "";
+  drawSim();
 }
+function drawSim() {
+  const F = SIM.frames, i = SIM.i, f = F[i];
+  const labels = F.map(x => dayLabel(x.date));
+  const upto = k => F.map((x, j) => j <= i ? x[k] : null);
+  const ds = [line("Bot's account", upto("eq"), "#3fb950", {borderWidth: 2.5}),
+              line("Same $10k in the S&P 500", upto("spy"), "#8b949e"),
+              line("Equal amounts in every stock", upto("ew"), "#d29922")];
+  if (SIM.chart) { SIM.chart.data.labels = labels; SIM.chart.data.datasets = ds; SIM.chart.update(); }
+  else SIM.chart = new Chart($("c-sim"), {type: "line", data: {labels, datasets: ds}, options: chartOpts()});
+  $("sm-day").textContent = `${ymd(f.date)} (day ${i + 1} of ${F.length})`;
+  $("sm-eq").textContent = money(f.eq); $("sm-eq").className = "v " + cls(f.eq - 10000);
+  $("sm-spy").textContent = money(f.spy);
+  $("sm-vs").textContent = signed(f.eq - f.spy); $("sm-vs").className = "v " + cls(f.eq - f.spy);
+  $("sm-n").textContent = `${f.hold.length} / 7`;
+  $("sm-regime").textContent = f.regime ? "Up: buying" : "Down: waiting"; $("sm-regime").className = "v " + (f.regime ? "up" : "down");
+  $("sm-hold").innerHTML = `<tr><th>Stock</th><th>Since</th><th>Gain</th><th>Value</th></tr>` +
+    (f.hold.slice().sort((a, b) => b.gain - a.gain).map(h => `<tr><td><b>${esc(h.sym)}</b> <span class="muted">${esc(h.name)}</span></td>
+      <td>${dayLabel(h.since)}</td><td class="${cls(h.gain)}">${pct(h.gain)}</td><td>${money(h.value)}</td></tr>`).join("") ||
+     `<tr><td colspan="4" class="muted">${f.regime ? "In cash" : "In cash: the market is falling, so it waits"}</td></tr>`);
+  $("sm-plan").innerHTML = f.plan.map(o => `<div class="item"><span class="${o.side === "BUY" ? "up" : "down"}">${o.side}</span>
+      <div><b>${esc(o.sym)}</b> <span class="muted">${esc(o.name)}</span><div class="d">${esc(o.reason)}</div></div></div>`).join("") ||
+    `<div class="d muted">Hold everything.</div>`;
+  $("sm-preds").innerHTML = `<tr><th>#</th><th>Stock</th><th>Last 90 days</th><th class="wrap">Track record at this rank</th></tr>` +
+    f.preds.map(p => `<tr><td>${p.rank}</td><td><b>${esc(p.sym)}</b> <span class="muted">${esc(p.name)}</span></td>
+      <td class="up">${pct(p.gain90, 0)}</td><td class="wrap muted">${trackFor(p.rank)}</td></tr>`).join("");
+  const trades = F.slice(0, i + 1).flatMap(x => x.trades.map(t => [x.date, t])).reverse();
+  $("sm-log").innerHTML = trades.map(([d, t]) => `<div><span>${dayLabel(d)}</span><b class="${t.side === "BUY" ? "up" : cls(t.pnl || 0)}">${t.side} ${esc(t.sym)}</b>
+      @ ${money(t.price)}${t.pnl != null ? ` (${pct(t.ret)})` : ""}: <span style="color:inherit">${esc(t.reason)}</span></div>`).join("") ||
+    `<div class="muted">No trades yet. Press Play.</div>`;
+  $("sm-scrub").value = i;
+}
+function stopSim() { clearInterval(SIM.timer); SIM.timer = null; $("sm-play").textContent = "Play"; }
+$("sm-play").onclick = () => {
+  if (SIM.timer) return stopSim();
+  if (!SIM.frames) return;
+  if (SIM.i >= SIM.frames.length - 1) SIM.i = 0;
+  $("sm-play").textContent = "Pause";
+  SIM.timer = setInterval(() => { if (SIM.i >= SIM.frames.length - 1) return stopSim(); SIM.i++; drawSim(); }, 1000 / Number($("sm-speed").value));
+};
+$("sm-speed").oninput = () => { if (SIM.timer) { stopSim(); $("sm-play").click(); } };
+$("sm-step").onclick = () => { stopSim(); if (SIM.frames && SIM.i < SIM.frames.length - 1) { SIM.i++; drawSim(); } };
+$("sm-scrub").oninput = () => { if (!SIM.frames) return; stopSim(); SIM.i = Number($("sm-scrub").value); drawSim(); };
+$("sm-next").onclick = () => loadSim(true);
+$("sm-kind").onchange = () => loadSim();
+$("sm-months").onchange = () => loadSim();
 
-function drawScannerBacktest() {
-  const k = $("sc-bt-pick").value, T = scBt.tests[k];
-  if (!T) return;
-  const ymd = d => new Date(d + "T12:00").toLocaleDateString([], {year: "numeric", month: "short", day: "numeric"});
-  $("sc-bt-msg").textContent = `${T.stocks.toLocaleString()} stocks, ${ymd(T.start)} to ${ymd(T.end)}. ` +
-    `${T.trades} trades, ${T.win_rate}% winners.`;
-  const rows = [["scanner", "Scanner (these rules)"], ["spy", "S&P 500 (SPY)"], ["equal_weight", "Equal-weight, same stocks"]];
+// ---------------------------------------------------------------- backtest
+let BT = null, btChart = null;
+async function loadBacktest() {
+  $("bt-msg").textContent = "loading...";
+  try { BT = await getStatic("scanner_backtest.json"); } catch (e) { $("bt-msg").innerHTML = `<span class="err">Backtest data isn't built yet.</span>`; return; }
+  drawBacktest();
+}
+function drawBacktest() {
+  const T = BT.tests[$("bt-pick").value];
+  $("bt-msg").textContent = `${T.stocks.toLocaleString()} stocks, ${ymd(T.start)} to ${ymd(T.end)}. ${T.trades} trades, ${T.win_rate}% winners.`;
+  const rows = [["scanner", "The bot (these rules)"], ["spy", "S&P 500"], ["equal_weight", "Equal amounts in every stock"]];
   const cols = [["total", "Total return", "%"], ["cagr", "Per year", "%"], ["maxdd", "Worst drop", "%"],
                 ["worst_year", "Worst calendar year", "%"], ["sharpe", "Sharpe", ""], ["final", "$10k became", "$"]];
-  $("sc-bt-table").innerHTML = `<tr><th></th>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr>` +
-    rows.map(([key, label]) => `<tr><td><b>${label}</b></td>${cols.map(([c, , u]) => {
-      const v = T.stats[key][c];
-      return `<td>${v == null ? "-" : u === "$" ? money(v) : Number(v).toLocaleString() + u}</td>`;
+  $("bt-table").innerHTML = `<tr><th></th>${cols.map(c => `<th>${c[1]}</th>`).join("")}</tr>` +
+    rows.map(([k, label]) => `<tr><td><b>${label}</b></td>${cols.map(([c, , u]) => {
+      const v = T.stats[k][c];
+      return `<td>${v == null ? "-" : u === "$" ? money(v) : Number(v).toLocaleString("en-US") + u}</td>`;
     }).join("")}</tr>`).join("");
   const labels = T.curves.scanner.map(x => x[0]);
-  const ds = [lineDs("Scanner", T.curves.scanner.map(x => x[1]), "#3fb950", {borderWidth: 2.5}),
-              lineDs("S&P 500", T.curves.spy.map(x => x[1]), "#8b949e"),
-              lineDs("Equal-weight, same stocks", T.curves.equal_weight.map(x => x[1]), "#d29922")];
-  if (scChart) scChart.destroy();
-  scChart = new Chart($("c-scbt"), {type: "line", data: {labels, datasets: ds},
-    options: {animation: false, maintainAspectRatio: false, interaction: {mode: "index", intersect: false},
-              scales: {y: {type: "logarithmic"}, x: {ticks: {maxTicksLimit: 8}}}, plugins: {legend: {labels: {boxWidth: 10}}}}});
+  const ds = [line("The bot", T.curves.scanner.map(x => x[1]), "#3fb950", {borderWidth: 2.5}),
+              line("S&P 500", T.curves.spy.map(x => x[1]), "#8b949e"),
+              line("Equal amounts in every stock", T.curves.equal_weight.map(x => x[1]), "#d29922")];
+  if (btChart) btChart.destroy();
+  btChart = new Chart($("c-bt"), {type: "line", data: {labels, datasets: ds}, options: chartOpts(true)});
+  const P = T.predictions;
+  $("bt-preds").innerHTML = `<tr><th>Stocks</th><th>Rose over the next month</th><th>Average gain</th><th>Median gain</th><th>Samples</th></tr>` +
+    Object.entries(P.buckets).map(([k, v]) => `<tr><td><b>${esc(k)}</b></td><td>${v.up}%</td>
+      <td class="${cls(v.avg)}">${v.avg > 0 ? "+" : ""}${v.avg}%</td><td class="${cls(v.median)}">${v.median > 0 ? "+" : ""}${v.median}%</td>
+      <td class="muted">${v.n.toLocaleString("en-US")}</td></tr>`).join("");
+  const tr = list => `<tr><th>Stock</th><th>Held</th><th>Result</th></tr>` + list.map(x => `<tr><td><b>${esc(x.sym)}</b></td>
+      <td>${ymd(x.held_since)} to ${ymd(x.date)}</td><td class="${cls(x.ret)}">${pct(x.ret)}</td></tr>`).join("");
+  $("bt-best").innerHTML = tr(T.best); $("bt-worst").innerHTML = tr(T.worst);
 }
-$("sc-bt-pick").onchange = () => scBt && drawScannerBacktest();
+$("bt-pick").onchange = () => BT && drawBacktest();
 
+// ---------------------------------------------------------------- how it works
 async function loadRules() {
   try {
-    const r = await api("/api/rules");
-    $("reality").innerHTML = `<b>Reality check:</b> ${r.reality}`;
-    $("rules").innerHTML = `<tr><th></th><th>Rule</th><th>Where it comes from</th><th>What our tests showed</th></tr>` +
-      r.rules.map(x => `<tr><td class="${x.kept ? "up" : "down"}">${x.kept ? "kept" : "dropped"}</td>
-        <td style="white-space:normal">${x.rule}</td><td style="white-space:normal;color:var(--muted)">${x.source}</td>
-        <td style="white-space:normal;color:var(--muted)">${x.evidence || ""}</td></tr>`).join("");
-  } catch (e) { $("rules").innerHTML = `<tr><td class="err">Could not load rules</td></tr>`; }
+    const r = await getJSON("rules.json?t=" + Date.now());
+    $("reality").innerHTML = `<b>Reality check:</b> ${esc(r.reality)}`;
+    $("rules").innerHTML = `<tr><th></th><th class="wrap">Rule</th><th class="wrap">Where it comes from</th><th class="wrap">What our tests showed</th></tr>` +
+      r.rules.map(x => `<tr><td class="${x.kept ? "up" : "down"}">${x.kept ? "kept" : "dropped"}</td><td class="wrap">${esc(x.rule)}</td>
+        <td class="wrap muted">${esc(x.source)}</td><td class="wrap muted">${esc(x.evidence)}</td></tr>`).join("");
+  } catch (e) { $("rules").innerHTML = `<tr><td class="err">Could not load the rules.</td></tr>`; }
 }
+
+loadTrack().then(loadLive);
 loadRules();
-
-if (HOSTED) {
-  // no server here: nothing to reset, and the pre-built data covers NVDA only
-  $("reset").classList.add("hidden");
-  for (const id of ["rp-sym", "bt-sym"]) {
-    $(id).value = "NVDA"; $(id).disabled = true;
-    $(id).title = "The hosted page has NVDA only. Run bot.py on your PC to try other symbols.";
-  }
-  $("live-note").textContent = "Runs on GitHub every 5 minutes during US market hours. GitHub sometimes starts runs a few " +
-    "minutes late; the bot catches up on any bars it missed. Simulator and Backtest data are rebuilt once a day.";
-}
-
-refreshLive();
-loadScanner();
-setInterval(() => { if (!$("scan").classList.contains("hidden")) loadScanner(); }, 60000);
-setInterval(refreshLive, 15000);
+setInterval(loadLive, 60000);
 </script>
 </body>
 </html>

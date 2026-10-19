@@ -1,1 +1,0 @@
-{"symbol": "NVDA", "acct": {"cash": 10000.0, "shares": 0.0, "entry": null, "stop": null, "high": null, "rearm_above": null, "trades": [], "equity": [], "last_t": 1792180800, "start_price": 214.1300048828125, "start_t": 1792180500}, "log": [[1792356116, "Bot started on NVDA. Latest finished 5-minute bar closed Fri Oct 16, 1:00 PM PT; waiting for new bars"]]}

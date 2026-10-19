@@ -36,6 +36,7 @@ PARAMS = dict(
     rebalance_day=2,     # 0=Mon ... 2=Wed (Clenow trades on Wednesdays)
     every_weeks=4,       # full rebalance every 4th week: weekly churned and earned far less in testing
     trail_atr=None,      # optional trailing stop, k x ATR(20) under the highest close
+    cooldown_days=90,    # after selling on a broken trend, move on: no rebuy for 90 days (free in tests; "forever" cost 2-4%/yr)
 )
 
 
@@ -194,7 +195,7 @@ def decide(book, P, ind, t, p=PARAMS, force_rebalance=False):
             for s in ranks:
                 if slots <= 0:
                     break
-                if s in book["pos"] or s in selling:
+                if s in book["pos"] or s in selling or book.get("banned", {}).get(s, "") > date:
                     continue
                 rank = ranks.index(s) + 1
                 gain = P["C"][s].iloc[t] / P["C"][s].iloc[t - p["window"] + 1] - 1
@@ -213,7 +214,7 @@ def execute(book, prices, date, equity_now, p=PARAMS, atr=None):
         px = prices.get(o["sym"])
         if h is None or px is None or not np.isfinite(px):
             continue
-        _sell(book, o["sym"], px, date, o["reason"])
+        _sell(book, o["sym"], px, date, o["reason"], p)
     slot = equity_now / p["n"]
     for o in [o for o in book["pending"] if o["side"] == "BUY"]:
         px = prices.get(o["sym"])
@@ -232,8 +233,12 @@ def execute(book, prices, date, equity_now, p=PARAMS, atr=None):
     book["pending"] = []
 
 
-def _sell(book, s, px, date, reason):
+def _sell(book, s, px, date, reason, p=PARAMS):
     h = book["pos"].pop(s)
+    cd = p.get("cooldown_days")
+    if cd and "below" in reason:  # the trend broke: move on, don't chase it back
+        until = "9999-12-31" if cd == "forever" else (datetime.fromisoformat(date) + pd.Timedelta(days=cd)).date().isoformat()
+        book.setdefault("banned", {})[s] = until
     book["cash"] += h["shares"] * px * (1 - FEE)
     pnl = h["shares"] * (px * (1 - FEE) - h["entry"] * (1 + FEE))
     book["trades"].append(dict(date=date, side="SELL", sym=s, price=round(px, 4), shares=round(h["shares"], 4),
@@ -280,6 +285,143 @@ def backtest(P, ind, p=PARAMS, start=260):
     return book, curve
 
 
+PRED_BUCKETS = [("Top 7 (what it buys)", 1, 7), ("Ranked 8-25", 8, 25), ("Ranked 26-100", 26, 100),
+                ("Passed filters, ranked lower", 101, 10**6)]
+
+
+def prediction_stats(P, ind, p=PARAMS, start=260, step=5, horizon=21):
+    """How often stocks at each rank really rose over the next month, vs an average stock.
+    This is the honest track record behind the bot's 'predictions'."""
+    C = P["C"]
+    fwd = (C.shift(-horizon) / C - 1)
+    out = {name: [] for name, _, _ in PRED_BUCKETS}
+    everyone = []
+    for t in range(start, len(C) - horizon, step):
+        ranks = ranking(P, ind, t, p)
+        f = fwd.iloc[t]
+        everyone.extend(f.drop("SPY").dropna().clip(-0.9, 3).tolist())
+        for name, lo, hi in PRED_BUCKETS:
+            out[name].extend(f[ranks[lo - 1:hi]].dropna().clip(-0.9, 3).tolist())
+    summary = lambda xs: dict(n=len(xs), up=round(float(np.mean([x > 0 for x in xs])) * 100, 1),
+                              avg=round(float(np.mean(xs)) * 100, 2), median=round(float(np.median(xs)) * 100, 2))
+    res = {name: summary(xs) for name, xs in out.items() if xs}
+    res["Average stock"] = summary(everyone)
+    return dict(horizon_days=horizon, buckets=res)
+
+
+# ---------------------------------------------------------------- simulator: replay real past markets
+
+MARKETS = {  # by the S&P 500's average monthly move over the window
+    "bull": "S&P 500 rose more than 1.5% a month",
+    "choppy": "S&P 500 moved less than 1.5% a month either way",
+    "bear": "S&P 500 fell more than 1.5% a month",
+}
+SIM_MONTHS = (1, 3, 6)
+
+
+def classify(P, t0, days):
+    spy = P["C"]["SPY"]
+    monthly = (spy.iloc[t0 + days] / spy.iloc[t0]) ** (21 / days) - 1
+    return "bull" if monthly > 0.015 else "bear" if monthly < -0.015 else "choppy"
+
+
+def windows(P, months, start=260, step=5):
+    """Every real past window of this length (starting each week), grouped by market type."""
+    days = months * 21
+    out = {k: [] for k in MARKETS}
+    for t0 in range(start, len(P["C"]) - days - 1, step):
+        out[classify(P, t0, days)].append(t0)
+    return out
+
+
+def run_window(P, ind, t0, days, names, p=PARAMS, pred=None):
+    """Trade one real past window with $10,000, recording each day like the live dashboard would show it.
+    The bot only uses data up to each day; the next days are hidden from it."""
+    book = new_book()
+    dates = P["C"].index
+    spy0 = P["C"]["SPY"].iloc[t0]
+    rets = P["C"].drop(columns=["SPY"]).pct_change().clip(-0.5, 1.0)
+    ew = bot.START_CASH
+    frames = []
+    decide(book, P, ind, t0, p, force_rebalance=True)
+    for t in range(t0 + 1, t0 + days + 1):
+        row = lambda k: P[k].iloc[t].to_dict()
+        opens, lows, closes = row("O"), row("L"), row("C")
+        eq_prev = frames[-1]["eq"] if frames else bot.START_CASH
+        n_before = len(book["trades"])
+        if book["pending"]:
+            execute(book, opens, dates[t], eq_prev, p, ind["atr"].iloc[t - 1].to_dict())
+        check_stops(book, lows, opens, dates[t])
+        mark(book, closes, ind["atr"].iloc[t].to_dict(), p)
+        ew *= 1 + float(np.nan_to_num(rets.iloc[t].mean()))
+        eq = equity_of(book, closes)
+        ranks = decide(book, P, ind, t, p) if t < t0 + days else ranking(P, ind, t, p)
+        preds = []
+        for i, s in enumerate(ranks[:10], 1):
+            preds.append(dict(rank=i, sym=s, name=names.get(s, ""), gain90=round(float(P["C"][s].iloc[t] / P["C"][s].iloc[t - p["window"] + 1] - 1), 3),
+                              smooth=round(float(ind["r2"][s].iloc[t]), 2)))
+        frames.append(dict(
+            date=dates[t], eq=round(eq, 2), spy=round(float(bot.START_CASH * P["C"]["SPY"].iloc[t] / spy0), 2), ew=round(ew, 2),
+            regime=bool(ind["regime"].iloc[t]),
+            hold=[dict(sym=s, name=names.get(s, ""), value=round(h["shares"] * h["last"], 2), gain=round(h["last"] / h["entry"] - 1, 4),
+                       since=h["date"]) for s, h in book["pos"].items()],
+            trades=[dict(x, name=names.get(x["sym"], "")) for x in book["trades"][n_before:]],
+            plan=[dict(side=o["side"], sym=o["sym"], name=names.get(o["sym"], ""), reason=o["reason"]) for o in book["pending"]],
+            preds=preds))
+    return frames
+
+
+def sim_summary(P, ind, ts, days, p=PARAMS):
+    """How the bot did across every real past window of a type: the honest 'is this typical' numbers."""
+    res, beat = [], 0
+    for t0 in ts:
+        book = new_book()
+        decide(book, P, ind, t0, p, force_rebalance=True)
+        eq = bot.START_CASH
+        for t in range(t0 + 1, t0 + days + 1):
+            row = lambda k: P[k].iloc[t].to_dict()
+            if book["pending"]:
+                execute(book, row("O"), P["C"].index[t], eq, p)
+            check_stops(book, row("L"), row("O"), P["C"].index[t])
+            mark(book, row("C"), ind["atr"].iloc[t].to_dict(), p)
+            eq = equity_of(book, row("C"))
+            if t < t0 + days:
+                decide(book, P, ind, t, p)
+        r = eq / bot.START_CASH - 1
+        spy = P["C"]["SPY"].iloc[t0 + days] / P["C"]["SPY"].iloc[t0] - 1
+        res.append(r)
+        beat += r > spy
+    res = sorted(res)
+    q = lambda f: round(res[int(f * (len(res) - 1))] * 100, 1)
+    return dict(windows=len(res), profitable=round(100 * sum(x > 0 for x in res) / len(res)), beat_spy=round(100 * beat / len(res)),
+                median=q(0.5), p10=q(0.1), p90=q(0.9)) if res else None
+
+
+def build_sim(P, ind, names, out, per_type=6):
+    """Pre-build simulator runs for the hosted dashboard: market type x length, a few real windows each."""
+    index = {}
+    for months in SIM_MONTHS:
+        days = months * 21
+        groups = windows(P, months)
+        for kind, ts in groups.items():
+            if not ts:
+                continue
+            pick = [ts[int(i * (len(ts) - 1) / max(per_type - 1, 1))] for i in range(min(per_type, len(ts)))]
+            pick = sorted(set(pick))
+            summary = sim_summary(P, ind, ts, days)
+            runs = []
+            for k, t0 in enumerate(pick, 1):
+                frames = run_window(P, ind, t0, days, names)
+                name = f"scansim_{kind}_{months}_{k}.json"
+                with open(os.path.join(out, name), "w") as f:
+                    json.dump(dict(kind=kind, months=months, start=P["C"].index[t0], frames=frames), f, default=float, separators=(",", ":"))
+                runs.append(dict(file=name, start=P["C"].index[t0], end=frames[-1]["date"],
+                                 bot=round(frames[-1]["eq"] / bot.START_CASH * 100 - 100, 1),
+                                 spy=round(frames[-1]["spy"] / bot.START_CASH * 100 - 100, 1)))
+            index[f"{kind}_{months}"] = dict(kind=kind, months=months, about=MARKETS[kind], runs=runs, summary=summary)
+    return index
+
+
 def benchmarks(P, start=260):
     """SPY buy-and-hold, and an equal-weight index of the same universe (carries the same survivorship bias)."""
     C = P["C"].iloc[start:]
@@ -302,6 +444,36 @@ def stats(curve):
                 sharpe=round(r.mean() / r.std() * math.sqrt(252), 2) if r.std() else None,
                 worst_year=round(min((b / a - 1) * 100 for a, b in yearly.values()), 1),
                 final=round(v[-1], 2))
+
+
+RULES = [
+    dict(kept=True, rule="Scan every US stock worth $2B+ and priced $5+ each morning (~2,100 stocks).",
+         source="Nasdaq's full stock list", evidence="Covers the whole market, not one company."),
+    dict(kept=True, rule="Rank by how fast and how steadily each stock climbed over 90 trading days.",
+         source="Clenow, 'Stocks on the Move'; Jegadeesh & Titman (momentum); Da, Gurun & Warachka ('frog in the pan')",
+         evidence="Its top picks gained +2.8% to +3.4% a month on average vs +1.6% to +1.8% for an average stock."),
+    dict(kept=True, rule="Only buy stocks above their 100-day average, within 25% of their 52-week high, with enough trading.",
+         source="Clenow; George & Hwang (52-week high)", evidence="Keeps it to stocks already in healthy uptrends."),
+    dict(kept=True, rule="Skip stocks that jumped 15%+ in a single day lately (news spikes, not trends).",
+         source="Clenow", evidence="Removing it raised returns in one test but deepened the worst drop to -41%."),
+    dict(kept=True, rule="Only buy while the S&P 500 is above its 200-day average; otherwise wait in cash.",
+         source="Faber's 10-month rule; O'Neil's 'M' in CAN SLIM; Daniel & Moskowitz on momentum crashes",
+         evidence="Without it the worst year in the 9-year test went from -9% to -30%."),
+    dict(kept=True, rule="Hold the 7 strongest, equal amounts. Rebalance every 4 weeks.",
+         source="Tested here", evidence="7 beat 10 in both tests (36% and 41% a year). Weekly rebalancing earned far less (12%)."),
+    dict(kept=True, rule="Sell the morning after a holding closes below its 100-day average, then move on: no rebuying it for 90 days.",
+         source="Clenow's exit; tested here", evidence="The 90-day ban cost nothing; banning forever cost 2-4% a year."),
+    dict(kept=False, rule="Trailing stops (sell on intraday dips).", source="Common trading advice",
+         evidence="Cut returns sharply in both tests (as low as 3% a year): strong stocks dip and recover."),
+    dict(kept=False, rule="Rank by nearness to the 52-week high alone.", source="George & Hwang",
+         evidence="About 0% a year as a stand-alone ranking."),
+    dict(kept=False, rule="Loosen the jump filter to 25%.", source="Tested here",
+         evidence="+84% a year in one test but driven by a few lucky stocks; not reliable."),
+]
+REALITY = ("Paper money only. The tests use today's list of stocks, which leaves out companies that collapsed, so real "
+           "results would be lower. The bot's top picks rose about as often as an average stock (54-57% of months); "
+           "its edge is that its winners win bigger. A study of 19,646 day traders (Chague et al.) found 97% of those "
+           "who kept at it lost money: be skeptical of any strategy, including this one.")
 
 
 # ---------------------------------------------------------------- live paper trading (run every few minutes)
@@ -417,7 +589,7 @@ def live_tick(p=PARAMS, out_dir=None):
         verdict = f"All {len(book['pos'])} holdings above their sell lines. Decision: hold."
     st["check"] = dict(t=int(time.time()), verdict=verdict, rows=rows)
     if live.get("SPY") and now.weekday() < 5 and now.hour >= 9:
-        book["equity"].append([int(time.time()), round(eq, 2)])
+        book["equity"].append([int(time.time()), round(eq, 2), round(live["SPY"]["price"], 2)])
         book["equity"] = book["equity"][-20000:]
         st["days"][today] = [round(eq, 2), round(live["SPY"]["price"], 2)]
     st["updated_at"] = int(time.time())
@@ -426,6 +598,10 @@ def live_tick(p=PARAMS, out_dir=None):
         json.dump(st, f, default=float)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(HERE, "dashboard.html"), "rb") as src, open(os.path.join(out_dir, "index.html"), "wb") as dst:
+            dst.write(src.read())
+        with open(os.path.join(out_dir, "rules.json"), "w") as f:
+            json.dump(dict(rules=RULES, reality=REALITY, params=p), f)
         view = dict(st, equity_now=round(eq, 2), start_cash=bot.START_CASH, params=p,
                     spy_now=prices.get("SPY"), prices={s: round(v, 4) for s, v in prices.items()})
         with open(os.path.join(out_dir, "scanner.json"), "w") as f:
@@ -444,8 +620,10 @@ def view():
 
 
 def build_backtest(out_path):
-    """Backtest results for the dashboard: all tradeable stocks (5y) and the 600 biggest (10y)."""
+    """Backtest results for the dashboard: all tradeable stocks (5y) and the 600 biggest (10y),
+    the honest track record of the rankings, and the real-past-market simulator runs."""
     uni = universe()
+    names = {u["symbol"]: u["name"] for u in uni}
     res = dict(built_at=int(time.time()), params=PARAMS, tests={})
     for key, syms, rng in (("all_5y", [u["symbol"] for u in uni], "5y"),
                            ("big600_10y", [u["symbol"] for u in uni][:600], "10y")):
@@ -461,6 +639,11 @@ def build_backtest(out_path):
             curves=dict(scanner=thin(curve), spy=thin(spy), equal_weight=thin(ew)),
             trades=len(sells), win_rate=round(float(np.mean([x["pnl"] > 0 for x in sells])) * 100) if sells else None,
             best=sorted(sells, key=lambda x: -x["ret"])[:5], worst=sorted(sells, key=lambda x: x["ret"])[:5])
+        res["tests"][key]["predictions"] = prediction_stats(P, ind)
+        if key == "big600_10y":  # the simulator replays real past windows from the 9-year data
+            index = build_sim(P, ind, names, os.path.dirname(out_path))
+            with open(os.path.join(os.path.dirname(out_path), "scansim_index.json"), "w") as f:
+                json.dump(index, f, default=float, separators=(",", ":"))
     with open(out_path, "w") as f:
         json.dump(res, f, default=float, separators=(",", ":"))
     return res

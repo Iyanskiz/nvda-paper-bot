@@ -15,9 +15,19 @@ Dashboard: https://nvda-paper-bot.vercel.app (mirror: https://iyanskiz.github.io
 1. Each weekday morning pull all ~7,000 NYSE/Nasdaq/AMEX stocks from Nasdaq; keep ~2,100 real companies ($2B+ market cap, $5+ price).
 2. Rank by how fast and how steadily each climbed over 90 trading days (Clenow: regression slope x R^2).
 3. Filters: above the 100-day average, within 25% of the 52-week high, no 15%+ one-day jumps, enough volume.
-4. Buy the top 7 in equal amounts, only while the S&P 500 is above its 200-day average.
-5. Sell the morning after a holding closes below its 100-day average, and don't buy it back for 90 days. Full rebalance every 4 weeks.
-6. Decide after the close, trade at the next open, 0.05% cost per trade.
+4. Buy the top few (5-10, chosen by its monthly learning) in equal amounts, only while the S&P 500 is above its 200-day average.
+5. Sell the morning after a holding closes below its 100-day average, and don't buy it back for 90 days. Full rebalance every few weeks.
+6. Decide after the close, trade at the next open, 0.05% cost per trade. Checks every minute during market hours.
+7. **Learns monthly:** replays the past 12 months with 27 setting combos (5/7/10 stocks, 60/90/120-day trends,
+   rebalance every 3/4/6 weeks) and switches to the best. Walk-forward tested: 50.5%/yr vs 41.3% fixed (9 years),
+   33.9% vs 32.8% (4 years); learning from 6 or 24 months was unreliable. It also keeps a journal of its own trades.
+
+## Penny-stock bot (standby, not running)
+
+`penny.py` / `penny_data.py` test day-trading strategies on every listed stock under $5. On 60 days of 5-minute data,
+every strategy lost money or roughly broke even after costs (opening-range breakout -36% to -50%, Gap and Go -15%,
+short fades -8% to -20% with borrow costs). Penny gap-ups closed below their open 65-72% of the time. Parked until a
+strategy survives testing.
 
 ## Results ($10,000 start)
 

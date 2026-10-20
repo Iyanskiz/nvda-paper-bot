@@ -1,4 +1,4 @@
-# The trading bot: ONE run stays up all trading day and trades every 5 minutes (see .github/scripts/trade_loop.sh).
+# The trading bot: ONE run stays up all trading day and checks every minute (see .github/scripts/trade_loop.sh).
 # The schedule below only starts that loop; several start times are listed because GitHub skips scheduled runs
 # on busy days. While a loop is running, extra starts just wait in line and exit fast once the day is over.
 name: trader

@@ -446,6 +446,63 @@ def stats(curve):
                 final=round(v[-1], 2))
 
 
+# ---------------------------------------------------------------- learning: re-tune itself from the past year
+
+LEARN_GRID = [(n, w, ew) for n in (5, 7, 10) for w in (60, 90, 120) for ew in (3, 4, 6)]  # stocks, trend days, weeks
+LEARN_LOOKBACK = 252   # trading days of experience it learns from (12 months tested best; 6 and 24 were unreliable)
+LEARN_EVERY = 28       # calendar days between re-tunes (monthly)
+
+
+def learn(P=None, base=PARAMS):
+    """Replay the last 12 months with each of 27 setting combos and pick the one that made the most.
+    Walk-forward tested on 9 years: 50.5%/yr vs 41.3% fixed (600 biggest), 33.9% vs 32.8% (all stocks)."""
+    if P is None:
+        P = load_panel([u["symbol"] for u in universe()], "5y")
+    start = len(P["C"]) - LEARN_LOOKBACK - 1
+    inds, table = {}, []
+    for n, w, ew in LEARN_GRID:
+        p = dict(base, n=n, window=w, every_weeks=ew)
+        if w not in inds:
+            inds[w] = indicators(P, p)
+        book, curve = backtest(P, inds[w], p, start=start)
+        v = np.array([c[1] for c in curve])
+        r = v[1:] / v[:-1] - 1
+        table.append(dict(n=n, window=w, every_weeks=ew, ret=round(float(v[-1] / v[0] - 1) * 100, 1),
+                          maxdd=round(float((v / np.maximum.accumulate(v) - 1).min()) * 100, 1),
+                          sharpe=round(float(r.mean() / r.std() * math.sqrt(252)), 2) if r.std() else None))
+    table.sort(key=lambda x: -x["ret"])
+    return dict(at=int(time.time()), since=P["C"].index[start], until=P["C"].index[-1], best=table[0], table=table)
+
+
+def journal(book):
+    """Look back at its own closed trades: what worked, what didn't, and the patterns behind the losses."""
+    sells = [t for t in book["trades"] if t["side"] == "SELL"]
+    if not sells:
+        return dict(trades=0, lessons=["No closed trades yet. Lessons appear after its first sells."])
+    wins = [t for t in sells if t["pnl"] > 0]
+    losses = [t for t in sells if t["pnl"] <= 0]
+    days = lambda t: (datetime.fromisoformat(t["date"]) - datetime.fromisoformat(t["held_since"])).days
+    quick = [t for t in losses if days(t) <= 10]
+    by_reason = {}
+    for t in sells:
+        k = "trend broke" if "below" in t["reason"] else "rebalanced out" if "fell out" in t["reason"] else t["reason"]
+        by_reason.setdefault(k, []).append(t["ret"])
+    lessons = []
+    if wins and losses:
+        lessons.append(f"Average win {np.mean([t['ret'] for t in wins]) * 100:+.1f}% vs average loss "
+                       f"{np.mean([t['ret'] for t in losses]) * 100:+.1f}%: momentum works by letting winners run.")
+    if quick:
+        lessons.append(f"{len(quick)} of {len(losses)} losses were sold within 10 days of buying: trends that broke right "
+                       "away. The 90-day rebuy ban stops it chasing those stocks again.")
+    for k, rs in by_reason.items():
+        lessons.append(f"Sold because '{k}': {len(rs)} times, average result {np.mean(rs) * 100:+.1f}%.")
+    return dict(trades=len(sells), win_rate=round(100 * len(wins) / len(sells)),
+                avg_win=round(float(np.mean([t["ret"] for t in wins])) * 100, 1) if wins else None,
+                avg_loss=round(float(np.mean([t["ret"] for t in losses])) * 100, 1) if losses else None,
+                best=sorted(sells, key=lambda t: -t["ret"])[:3], worst=sorted(sells, key=lambda t: t["ret"])[:3],
+                lessons=lessons)
+
+
 RULES = [
     dict(kept=True, rule="Scan every US stock worth $2B+ and priced $5+ each morning (~2,100 stocks).",
          source="Nasdaq's full stock list", evidence="Covers the whole market, not one company."),
@@ -459,8 +516,13 @@ RULES = [
     dict(kept=True, rule="Only buy while the S&P 500 is above its 200-day average; otherwise wait in cash.",
          source="Faber's 10-month rule; O'Neil's 'M' in CAN SLIM; Daniel & Moskowitz on momentum crashes",
          evidence="Without it the worst year in the 9-year test went from -9% to -30%."),
-    dict(kept=True, rule="Hold the 7 strongest, equal amounts. Rebalance every 4 weeks.",
+    dict(kept=True, rule="Hold the strongest few in equal amounts and rebalance every few weeks (started at 7 stocks, every 4 weeks).",
          source="Tested here", evidence="7 beat 10 in both tests (36% and 41% a year). Weekly rebalancing earned far less (12%)."),
+    dict(kept=True, rule="Learn every month: replay the past 12 months with 27 setting combos and switch to the one that made the most.",
+         source="Walk-forward testing (each choice uses only data before it)",
+         evidence="9 years: 50.5%/yr vs 41.3% with fixed settings. 4 years, all stocks: 33.9% vs 32.8%. Learning from 6 or 24 months was unreliable."),
+    dict(kept=True, rule="Check every minute during market hours using 1-minute prices.",
+         source="Your request", evidence="Faster fills at the open; trades still follow the tested daily rules."),
     dict(kept=True, rule="Sell the morning after a holding closes below its 100-day average, then move on: no rebuying it for 90 days.",
          source="Clenow's exit; tested here", evidence="The 90-day ban cost nothing; banning forever cost 2-4% a year."),
     dict(kept=False, rule="Trailing stops (sell on intraday dips).", source="Common trading advice",
@@ -485,7 +547,7 @@ def _live_prices(symbols):
     """Latest price and today's low for each symbol, from 5-minute bars."""
     def get(sym):
         try:
-            bars, quote = bot.fetch_bars(sym, "5m", "1d")
+            bars, quote = bot.fetch_bars(sym, "1m", "1d")  # 1-minute bars: the freshest free price
             if not bars:
                 return sym, None
             return sym, dict(price=quote or bars[-1]["c"], low=min(b["l"] for b in bars), open=bars[0]["o"],
@@ -506,7 +568,25 @@ def live_tick(p=PARAMS, out_dir=None):
     today = now.date().isoformat()
     st = json.load(open(STATE_FILE)) if os.path.exists(STATE_FILE) else dict(book=new_book(), days={}, log=[])
     book = st["book"]
+    before = (len(book["trades"]), len(st["log"]))
     note = lambda msg: st["log"].append([int(time.time()), msg])
+
+    # learning: once a month (outside market hours) re-test 27 setting combos on the past year, adopt the best
+    learned = st.get("learned")
+    if (not learned or time.time() - learned["at"] > LEARN_EVERY * 86400) and not _market_open(now):
+        try:
+            old = learned["best"] if learned else dict(n=p["n"], window=p["window"], every_weeks=p["every_weeks"])
+            learned = st["learned"] = learn(base=p)
+            b = learned["best"]
+            same = (b["n"], b["window"], b["every_weeks"]) == (old["n"], old["window"], old["every_weeks"])
+            note(f"Learned from the last 12 months ({learned['since']} to {learned['until']}): best was holding {b['n']} "
+                 f"stocks, {b['window']}-day trends, rebalancing every {b['every_weeks']} weeks ({b['ret']:+.1f}% "
+                 f"over the year). " + ("Keeping the same settings." if same else "Switching to those settings."))
+        except Exception as e:
+            note(f"Learning step failed ({type(e).__name__}); keeping the current settings.")
+    if st.get("learned"):
+        b = st["learned"]["best"]
+        p = dict(p, n=b["n"], window=b["window"], every_weeks=b["every_weeks"])
 
     if st.get("last_scan") != today or st.get("params_used") != p:  # new day, or the rules changed
         if st.get("last_scan") == today:
@@ -592,7 +672,10 @@ def live_tick(p=PARAMS, out_dir=None):
         book["equity"].append([int(time.time()), round(eq, 2), round(live["SPY"]["price"], 2)])
         book["equity"] = book["equity"][-20000:]
         st["days"][today] = [round(eq, 2), round(live["SPY"]["price"], 2)]
+    st["journal"] = journal(book)
     st["updated_at"] = int(time.time())
+    if (len(book["trades"]), len(st["log"])) != before:  # something worth saving right away (the loop checks this)
+        open(os.path.join(HERE, ".changed"), "w").close()
     st["log"] = st["log"][-200:]
     with open(STATE_FILE, "w") as f:
         json.dump(st, f, default=float)

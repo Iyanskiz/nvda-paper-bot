@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Trades every 5 minutes for as long as the market window is open, inside ONE GitHub Actions job.
+# Checks every 1 minute for as long as the market window is open, inside ONE GitHub Actions job.
 # GitHub's own schedules skip runs on busy days (Oct 19 2026: 2 runs instead of ~100), so we don't rely on them for
 # the 5-minute rhythm, only to start this loop. Jobs are capped at 6 hours, so near that limit the loop starts a
 # fresh run of this workflow to carry on.
@@ -20,10 +20,16 @@ publish() {  # one commit, force-pushed, so the data branch never grows
   (cd /tmp/data && git init -q -b data && git add -A     && git commit -q -m "live data $(date -u +'%Y-%m-%d %H:%M') UTC"     && git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data)     || echo "publish failed (will retry next round)"
 }
 
+last_save=0
 limit=$((330 * 60))   # stop at 5.5 hours, before GitHub's 6-hour cap
 while in_window; do
   python scanner.py --tick || echo "tick failed (will retry next round)"
-  git add scanner_state.json
+  # save to main when a trade or scan happened, otherwise every 15 minutes (the dashboard gets every minute anyway)
+  if [ -f .changed ] || [ $(( $(date +%s) - last_save )) -ge 900 ]; then
+    rm -f .changed
+    last_save=$(date +%s)
+    git add scanner_state.json
+  fi
   if ! git diff --cached --quiet; then
     git commit -q -m "bot: $(date -u +'%Y-%m-%d %H:%M') UTC"
     git pull -q --rebase && git push -q || echo "push failed (will retry next round)"
@@ -36,6 +42,6 @@ while in_window; do
     fi
     break
   fi
-  sleep $(( 300 - $(date +%s) % 300 + 20 ))   # wake 20 seconds after the next 5-minute mark (bars have closed)
+  sleep $(( 60 - $(date +%s) % 60 + 5 ))   # wake 5 seconds after the next minute mark
 done
 echo "loop finished at $(date -u +%H:%M) UTC"

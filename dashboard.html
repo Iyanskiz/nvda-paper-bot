@@ -117,6 +117,17 @@
         <div class="scroll log" id="lv-log"></div>
       </div>
     </div>
+    <div class="grid two">
+      <div class="card">
+        <h2>What it learned (re-tunes itself every month)</h2>
+        <div id="lv-learn" class="muted">Its first learning run happens before the next market open.</div>
+        <div class="scroll wide" style="max-height:240px;margin-top:8px"><table id="lv-learn-table"></table></div>
+      </div>
+      <div class="card">
+        <h2>Its own trade review (mistakes and lessons)</h2>
+        <div id="lv-journal" class="list"></div>
+      </div>
+    </div>
     <div class="card">
       <h2>Every trade</h2>
       <div class="scroll wide"><table id="lv-trades"></table></div>
@@ -216,11 +227,13 @@
       <ol>
         <li><b>Scan:</b> every weekday morning it pulls the full list of ~7,000 US stocks and keeps ~2,100 real companies.</li>
         <li><b>Predict:</b> it scores each by how fast and how steadily it climbed over 90 trading days. Steady climbers tend to keep going.</li>
-        <li><b>Invest:</b> it buys the 7 strongest in equal amounts, but only while the S&amp;P 500 is above its 200-day average.</li>
+        <li><b>Invest:</b> it buys the <span class="p-n">5</span> strongest in equal amounts, but only while the S&amp;P 500 is above its 200-day average.</li>
         <li><b>Wait:</b> when the overall market is falling it buys nothing new and keeps cash.</li>
         <li><b>Sell and move on:</b> the morning after a holding closes below its 100-day average it sells, and won't buy that
-          stock again for 90 days. Every 4 weeks it also swaps out anything that dropped out of the top 14.</li>
-        <li><b>Watch:</b> it checks every holding every 5 minutes during market hours and trades at real prices.</li>
+          stock again for 90 days. Every <span class="p-w">4</span> weeks it also swaps out anything that dropped out of the top <span class="p-x">10</span>.</li>
+        <li><b>Watch:</b> it checks every holding every minute during market hours and trades at real prices.</li>
+        <li><b>Learn:</b> once a month it replays the past 12 months with 27 different settings (how many stocks, how long
+          a trend, how often to rebalance) and switches to the one that made the most. It also reviews its own closed trades.</li>
       </ol>
       <p class="note" id="reality"></p>
     </div>
@@ -252,7 +265,7 @@ const line = (label, data, color, extra = {}) => Object.assign({label, data, bor
 const chartOpts = (log = false) => ({animation: false, maintainAspectRatio: false, interaction: {mode: "index", intersect: false},
   scales: {x: {ticks: {maxTicksLimit: 8}}, y: log ? {type: "logarithmic"} : {}}, plugins: {legend: {labels: {boxWidth: 10}}}});
 
-// Live numbers come from the data branch (pushed every 5 minutes); everything else is published with the page.
+// Live numbers come from the data branch (pushed every minute); everything else is published with the page.
 // The GitHub API always returns the current file; raw.githubusercontent.com can be minutes stale at some locations,
 // and the copy published with the page only updates once a day. Ask all three and show whichever is newest.
 const DATA_API = "https://api.github.com/repos/Iyanskiz/nvda-paper-bot/contents/scanner.json?ref=data";
@@ -329,7 +342,7 @@ async function loadLive() {
                 line("Same $10k in the S&P 500", pts.map(p => start * p[2] / s.start_spy), "#8b949e")];
     if (liveChart) { liveChart.data.labels = labels; liveChart.data.datasets = ds; liveChart.update(); }
     else liveChart = new Chart($("c-live"), {type: "line", data: {labels, datasets: ds}, options: chartOpts()});
-    $("lv-chart-note").textContent = `${pts.length} checks so far, every 5 minutes while the market is open.`;
+    $("lv-chart-note").textContent = `${pts.length} checks so far, every minute while the market is open.`;
   } else {
     $("lv-chart-note").textContent = "The chart starts with the first check during market hours.";
   }
@@ -363,6 +376,27 @@ async function loadLive() {
       return `<tr><td>${dayLabel(d)}</td><td>${money(eq)}</td><td class="${cls(eq - prev)}">${signed(eq - prev)}</td>
         <td>${money(spy)}</td><td>${hold ? money(hold) : "-"}</td><td class="${cls(eq - (hold || eq))}">${hold ? signed(eq - hold) : "-"}</td></tr>`;
     }).join("") || `<tr><td colspan="6" class="muted">The first row appears after its first trading day.</td></tr>`);
+  document.querySelectorAll(".p-n").forEach(e => e.textContent = s.params.n);
+  document.querySelectorAll(".p-w").forEach(e => e.textContent = s.params.every_weeks);
+  document.querySelectorAll(".p-x").forEach(e => e.textContent = s.params.n * s.params.exit_rank);
+  const L = s.learned;
+  if (L) {
+    const b = L.best, cur = L.table.find(x => x.n === 7 && x.window === 90 && x.every_weeks === 4);
+    $("lv-learn").innerHTML = `Last learned ${ptStamp(L.at)} from ${ymd(L.since)} to ${ymd(L.until)}.
+      Now holding <b>${b.n}</b> stocks, ranking by <b>${b.window}</b>-day trends, rebalancing every <b>${b.every_weeks}</b> weeks:
+      that combination made <b class="${cls(b.ret)}">${b.ret > 0 ? "+" : ""}${b.ret}%</b> over the past year` +
+      (cur ? ` (the original 7-stock, 90-day settings made ${cur.ret > 0 ? "+" : ""}${cur.ret}%).` : ".") +
+      ` Next re-tune about ${dayLabel(new Date((L.at + 28 * 86400) * 1000).toISOString().slice(0, 10))}.`;
+    $("lv-learn-table").innerHTML = `<tr><th>Stocks</th><th>Trend days</th><th>Rebalance</th><th>Past year</th><th>Worst drop</th></tr>` +
+      L.table.slice(0, 10).map((x, k) => `<tr${k === 0 ? ' style="font-weight:600"' : ""}><td>${x.n}</td><td>${x.window}</td>
+        <td>every ${x.every_weeks} wks</td><td class="${cls(x.ret)}">${x.ret > 0 ? "+" : ""}${x.ret}%</td><td>${x.maxdd}%</td></tr>`).join("");
+  }
+  const J = s.journal;
+  if (J) {
+    $("lv-journal").innerHTML = (J.trades ? `<div class="item"><span>${J.trades}</span><div>closed trades, ${J.win_rate}% winners
+        <div class="d">average win ${J.avg_win ?? "-"}%, average loss ${J.avg_loss ?? "-"}%</div></div></div>` : "") +
+      J.lessons.map(l => `<div class="item"><span class="muted">&#8226;</span><div>${esc(l)}</div></div>`).join("");
+  }
   $("lv-log").innerHTML = (s.log || []).slice().reverse().map(([t, m]) => `<div><span>${ptStamp(t)}</span>${esc(m)}</div>`).join("");
   $("lv-trades").innerHTML = `<tr><th>When</th><th>Side</th><th>Stock</th><th>Price</th><th>Result</th><th class="wrap">Why</th></tr>` +
     (b.trades.slice().reverse().map(x => `<tr><td>${x.at ? ptStamp(x.at) : dayLabel(x.date)}</td>
@@ -410,7 +444,7 @@ function drawSim() {
   $("sm-eq").textContent = money(f.eq); $("sm-eq").className = "v " + cls(f.eq - 10000);
   $("sm-spy").textContent = money(f.spy);
   $("sm-vs").textContent = signed(f.eq - f.spy); $("sm-vs").className = "v " + cls(f.eq - f.spy);
-  $("sm-n").textContent = `${f.hold.length} / 7`;
+  $("sm-n").textContent = `${f.hold.length} / 7`;  // the simulator replays the tested 7-stock rules
   $("sm-regime").textContent = f.regime ? "Up: buying" : "Down: waiting"; $("sm-regime").className = "v " + (f.regime ? "up" : "down");
   $("sm-hold").innerHTML = `<tr><th>Stock</th><th>Since</th><th>Gain</th><th>Value</th></tr>` +
     (f.hold.slice().sort((a, b) => b.gain - a.gain).map(h => `<tr><td><b>${esc(h.sym)}</b> <span class="muted">${esc(h.name)}</span></td>

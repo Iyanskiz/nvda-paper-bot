@@ -36,6 +36,8 @@ PARAMS = dict(
     rebalance_day=2,     # 0=Mon ... 2=Wed (Clenow trades on Wednesdays)
     every_weeks=4,       # full rebalance every 4th week: weekly churned and earned far less in testing
     trail_atr=None,      # optional trailing stop, k x ATR(20) under the highest close
+    leverage=1.25,       # while the S&P 500 trend is up, invest 1.25x the account (borrowing 25%); 1.0x when it's down
+    margin_rate=0.06,    # yearly interest on borrowed money
     cooldown_days=90,    # after selling on a broken trend, move on: no rebuy for 90 days (free in tests; "forever" cost 2-4%/yr)
 )
 
@@ -215,12 +217,14 @@ def execute(book, prices, date, equity_now, p=PARAMS, atr=None):
         if h is None or px is None or not np.isfinite(px):
             continue
         _sell(book, o["sym"], px, date, o["reason"], p)
-    slot = equity_now / p["n"]
+    lev = p.get("lev_now", 1.0)
+    slot = equity_now * lev / p["n"]
+    borrow_room = equity_now * (lev - 1.0)
     for o in [o for o in book["pending"] if o["side"] == "BUY"]:
         px = prices.get(o["sym"])
         if px is None or not np.isfinite(px) or o["sym"] in book["pos"]:
             continue
-        alloc = min(book["cash"], slot)
+        alloc = min(book["cash"] + borrow_room, slot)
         if alloc < 0.25 * slot:
             break
         sh = alloc / (px * (1 + FEE))
@@ -271,7 +275,11 @@ def backtest(P, ind, p=PARAMS, start=260):
     book = new_book()
     dates = P["C"].index
     curve = []
+    p = dict(p)
     for t in range(start, len(dates)):
+        p["lev_now"] = p.get("leverage", 1.0) if bool(ind["regime"].iloc[t - 1]) else 1.0
+        if book["cash"] < 0:  # interest on borrowed money, one trading day
+            book["cash"] -= -book["cash"] * p.get("margin_rate", 0.06) / 252
         row = lambda k: P[k].iloc[t].to_dict()
         opens, lows, closes = row("O"), row("L"), row("C")
         eq_prev = curve[-1][1] if curve else book["cash"]
@@ -521,6 +529,14 @@ RULES = [
     dict(kept=True, rule="Learn every month: replay the past 12 months with 27 setting combos and switch to the one that made the most.",
          source="Walk-forward testing (each choice uses only data before it)",
          evidence="9 years: 50.5%/yr vs 41.3% with fixed settings. 4 years, all stocks: 33.9% vs 32.8%. Learning from 6 or 24 months was unreliable."),
+    dict(kept=True, rule="While the S&P 500 trend is up, invest 1.25x the account (borrowing 25% at 6% a year); no borrowing when it's down.",
+         source="Tested here (smart-risk experiment)",
+         evidence="7-stock rules: 32.7% to 40.7%/yr (all stocks) and 41.3% to 51.1%/yr (600 biggest); worst drop -30% to -36% and -26% to -32%. 1.5x earned more but drops reached -44% to -58%."),
+    dict(kept=True, rule="Read company news and SEC filings for every holding and the next candidates: serious red flags (bankruptcy, delisting, restatement, going concern, fraud action, FDA rejection) block buys and sell holdings; warnings (offerings, guidance cuts, short reports) block buys and sell only if the price falls 5%+ vs the market.",
+         source="Chan 2003; Tetlock et al. 2008; Loughran & McDonald 2011; event studies on offerings, restatements, bankruptcy",
+         evidence="Bad news drifts for weeks; good news is priced in within hours, so good news only breaks ties. Not backtested here (no free headline history); a protective rule."),
+    dict(kept=True, rule="Rescan all ~2,100 stocks with live prices every minute: live leaderboard, today's movers, and sell-line warnings.",
+         source="Your request", evidence="Re-ranking or swapping buys at the open did not beat the tested daily rules (24-26% vs 24%/yr; 35-41% vs 38%), so the rescan watches and reports but the daily rules decide."),
     dict(kept=True, rule="Check every minute during market hours using 1-minute prices.",
          source="Your request", evidence="Faster fills at the open; trades still follow the tested daily rules."),
     dict(kept=True, rule="Sell the morning after a holding closes below its 100-day average, then move on: no rebuying it for 90 days.",
@@ -556,6 +572,49 @@ def _live_prices(symbols):
             return sym, None
     with ThreadPoolExecutor(8) as ex:
         return {s: v for s, v in ex.map(get, symbols) if v}
+
+
+def market_snapshot(symbols, batch=20, threads=10):
+    """Live price and today's high/low for every symbol, ~20 per request via Yahoo's spark endpoint
+    (about 3 seconds for all ~2,100). Nasdaq's all-stocks list is a day stale, so it isn't used for live prices."""
+    def get(chunk):
+        url = ("https://query1.finance.yahoo.com/v8/finance/spark?symbols=" + ",".join(chunk) +
+               "&range=1d&interval=1m")
+        for k in range(2):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    data = json.load(r)
+                out = {}
+                for sym, v in data.items():
+                    closes = [c for c in (v.get("close") or []) if c is not None]
+                    if closes:
+                        out[sym] = dict(price=closes[-1], prev=v.get("chartPreviousClose"),
+                                        high=max(closes), low=min(closes), t=(v.get("timestamp") or [0])[-1])
+                return out
+            except Exception:
+                time.sleep(1 + k)
+        return {}
+    chunks = [symbols[i:i + batch] for i in range(0, len(symbols), batch)]
+    with ThreadPoolExecutor(threads) as ex:
+        res = list(ex.map(get, chunks))
+    return {k: v for r in res for k, v in r.items()}
+
+
+def _today_numbers(st, eq, spy_now, today):
+    """Today's profit: equity now vs. the last equity recorded on an earlier day (or the starting cash)."""
+    prev_days = sorted(d for d in st.get("days", {}) if d < today)
+    start_eq = st["days"][prev_days[-1]][0] if prev_days else bot.START_CASH
+    prev_spy = st["days"][prev_days[-1]][1] if prev_days else (st.get("spy_close") if st.get("scan_date", today) < today else None)
+    spy_pct = (spy_now / prev_spy - 1) if (spy_now and prev_spy) else None
+    return dict(date=today, start_equity=round(start_eq, 2), pnl=round(eq - start_eq, 2),
+                pct=round(eq / start_eq - 1, 5), spy_pct=round(spy_pct, 5) if spy_pct is not None else None)
+
+
+def prices_spy_pct(live, st):
+    spy = live.get("SPY")
+    prev = st.get("spy_close") if st.get("scan_date", "") < datetime.now(bot.ET).date().isoformat() else None
+    return (spy["price"] / prev - 1) if spy and prev else None
 
 
 def _market_open(now):
@@ -625,10 +684,83 @@ def live_tick(p=PARAMS, out_dir=None):
         if "start_spy" not in st:
             st["start_spy"], st["start_date"] = st["spy_close"], st["scan_date"]
 
+    # ---- news: holdings, planned buys and the next candidates (cached 15 min; failures never block trading)
+    import news as NEWS
+    cand = [r["sym"] for r in st.get("top", [])[:15]]
+    watch_news = sorted(set(book["pos"]) | {o["sym"] for o in book["pending"]} | set(cand))
+    try:
+        st["news"] = NEWS.check(watch_news)
+    except Exception as e:
+        st.setdefault("news", {})
+        note(f"News check failed ({type(e).__name__}); trading on price rules only.")
+    nv = st.get("news", {})
+    bad = lambda sym, levels=("veto", "caution"): nv.get(sym, {}).get("verdict") in levels
+    # planned buys hit by bad news are swapped for the next clean candidate
+    if book["pending"] and any(o["side"] == "BUY" and bad(o["sym"]) for o in book["pending"]):
+        keep = [o for o in book["pending"] if not (o["side"] == "BUY" and bad(o["sym"]))]
+        dropped = [o["sym"] for o in book["pending"] if o["side"] == "BUY" and bad(o["sym"])]
+        taken = set(book["pos"]) | {o["sym"] for o in keep}
+        for sym in cand:
+            if len(keep) - sum(o["side"] == "SELL" for o in keep) >= len(book["pending"]) - sum(o["side"] == "SELL" for o in book["pending"]):
+                break
+            if sym in taken or bad(sym) or book.get("banned", {}).get(sym, "") > today:
+                continue
+            row = next(r for r in st["top"] if r["sym"] == sym)
+            keep.append(dict(side="BUY", sym=sym, rank=row["rank"], reason=f"#{row['rank']} strongest steady uptrend "
+                             f"(replacing a buy blocked by news): {row['gain90']:+.0%} in {p['window']} trading days"))
+            taken.add(sym)
+        book["pending"] = keep
+        for sym in dropped:
+            note(f"Skipped buying {sym}: {nv[sym]['summary']}")
+    # holdings with a serious red flag are sold; a warning sells only if the price confirms (down 5%+ vs the market)
+    for sym in list(book["pos"]):
+        v = nv.get(sym, {})
+        if v.get("verdict") == "veto" and not any(o["sym"] == sym and o["side"] == "SELL" for o in book["pending"]):
+            book["pending"].append(dict(side="SELL", sym=sym, reason="news veto: " + ", ".join(v.get("red_flags") or ["red flag"])))
+
     syms = sorted(set(book["pos"]) | {o["sym"] for o in book["pending"]} | {"SPY"})
     live = _live_prices(syms)
     prices = {s: v["price"] for s, v in live.items()}
+    p = dict(p, lev_now=p.get("leverage", 1.0) if st.get("regime") else 1.0)
+    st["risk"] = dict(exposure=p["lev_now"], note=(f"Investing {p['lev_now']:.2f}x the account (borrowing "
+                      f"{p['lev_now'] - 1:.0%} at {p.get('margin_rate', 0.06):.0%} a year) while the market trend is up"
+                      if p["lev_now"] > 1 else "No borrowing: the market trend is down, so no leverage"))
+    if st.get("interest_day") != today and now.weekday() < 5 and book["cash"] < 0:
+        interest = -book["cash"] * p.get("margin_rate", 0.06) / 252
+        book["cash"] -= interest
+        st["interest_paid"] = round(st.get("interest_paid", 0) + interest, 2)
+    st["interest_day"] = today
     if _market_open(now):
+        # live rescan of every stock: fresh prices for the whole market each minute
+        try:
+            t0 = time.time()
+            snap = market_snapshot([u["symbol"] for u in universe()])
+            took = time.time() - t0
+            changes = []
+            for sym in list(book["pos"]):  # caution news + a 5% drop vs the market = sell now
+                v, q, spy = nv.get(sym, {}), snap.get(sym), live.get("SPY")
+                if v.get("verdict") == "caution" and q and q.get("prev") and spy:
+                    rel = (q["price"] / q["prev"] - 1) - (prices_spy_pct(live, st) or 0)
+                    if rel <= -0.05 and not any(o["sym"] == sym for o in book["pending"]):
+                        book["pending"].append(dict(side="SELL", sym=sym, reason="bad news confirmed by the price: "
+                                                    + ", ".join(v.get("warnings") or ["warning"])))
+                        changes.append(f"Selling {sym}: {v.get('summary', '')} and it's down {rel:.0%} vs the market")
+            top = []
+            for r in st.get("top", [])[:10]:
+                q = snap.get(r["sym"], {})
+                chg = q["price"] / q["prev"] - 1 if q.get("prev") else None
+                top.append(dict(rank=r["rank"], sym=r["sym"], name=r["name"], live_price=q.get("price"),
+                                live_change=round(chg, 4) if chg is not None else None, held=r["sym"] in book["pos"]))
+            movers = sorted(((v["price"] / v["prev"] - 1, k) for k, v in snap.items() if v.get("prev")), reverse=True)
+            for sym in book["pos"]:
+                line = st.get("sell_line", {}).get(sym)
+                if line and snap.get(sym) and snap[sym]["price"] < line:
+                    changes.append(f"{sym} is below its sell line right now; sells at tomorrow's open if it closes there")
+            st["rescan"] = dict(t=int(time.time()), scanned=len(snap), took_s=round(took, 1), changes=changes, top=top,
+                                gainers=[dict(sym=k, change=round(c, 4)) for c, k in movers[:5]],
+                                losers=[dict(sym=k, change=round(c, 4)) for c, k in movers[-5:][::-1]])
+        except Exception as e:
+            note(f"Live rescan failed ({type(e).__name__}); using the morning scan.")
         if book["pending"]:
             done = len(book["trades"])
             execute(book, prices, today, equity_of(book, prices), p, st.get("atr"))
@@ -673,6 +805,8 @@ def live_tick(p=PARAMS, out_dir=None):
         book["equity"] = book["equity"][-20000:]
         st["days"][today] = [round(eq, 2), round(live["SPY"]["price"], 2)]
     st["journal"] = journal(book)
+    if now.weekday() < 5:
+        st["today"] = _today_numbers(st, eq, prices.get("SPY"), today)
     st["updated_at"] = int(time.time())
     if (len(book["trades"]), len(st["log"])) != before:  # something worth saving right away (the loop checks this)
         open(os.path.join(HERE, ".changed"), "w").close()

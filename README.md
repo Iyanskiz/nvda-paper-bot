@@ -18,7 +18,12 @@ Dashboard: https://nvda-paper-bot.vercel.app (mirror: https://iyanskiz.github.io
 4. Buy the top few (5-10, chosen by its monthly learning) in equal amounts, only while the S&P 500 is above its 200-day average.
 5. Sell the morning after a holding closes below its 100-day average, and don't buy it back for 90 days. Full rebalance every few weeks.
 6. Decide after the close, trade at the next open, 0.05% cost per trade. Checks every minute during market hours.
-7. **Learns monthly:** replays the past 12 months with 27 setting combos (5/7/10 stocks, 60/90/120-day trends,
+7. **Smart leverage:** 1.25x the account while the S&P 500 trend is up (6%/yr interest on the borrowed 25%), 1.0x otherwise.
+   Backtest: 40.7%/yr (all stocks) and 51.1%/yr (600 biggest) vs 32.7% / 41.3% without, worst drop -36% / -32%.
+8. **News:** `news.py` reads Yahoo/Nasdaq/Google headlines and SEC EDGAR filings for holdings and the next candidates.
+   Serious red flags block buys and sell holdings; warnings block buys and sell only if the price confirms.
+9. **Live rescan:** all ~2,100 stocks re-priced every minute (Yahoo spark, ~4 s); it reports, the tested daily rules decide.
+10. **Learns monthly:** replays the past 12 months with 27 setting combos (5/7/10 stocks, 60/90/120-day trends,
    rebalance every 3/4/6 weeks) and switches to the best. Walk-forward tested: 50.5%/yr vs 41.3% fixed (9 years),
    33.9% vs 32.8% (4 years); learning from 6 or 24 months was unreliable. It also keeps a journal of its own trades.
 

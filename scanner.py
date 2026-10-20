@@ -658,10 +658,22 @@ def main():
     ap.add_argument("--range", default="5y")
     ap.add_argument("--top", type=int, default=0, help="only the N biggest companies (0 = all)")
     ap.add_argument("--tick", action="store_true", help="cloud mode: one live pass, writes docs/scanner.json")
+    ap.add_argument("--site", action="store_true", help="write the dashboard files to docs/ without trading")
     ap.add_argument("--build-static", action="store_true", help="write docs/static/scanner_backtest.json")
     args = ap.parse_args()
     if args.tick:
         live_tick(out_dir=os.path.join(HERE, "docs"))
+        return
+    if args.site:
+        docs = os.path.join(HERE, "docs")
+        os.makedirs(docs, exist_ok=True)
+        with open(os.path.join(HERE, "dashboard.html"), "rb") as src, open(os.path.join(docs, "index.html"), "wb") as dst:
+            dst.write(src.read())
+        with open(os.path.join(docs, "rules.json"), "w") as f:
+            json.dump(dict(rules=RULES, reality=REALITY, params=PARAMS), f)
+        with open(os.path.join(docs, "scanner.json"), "w") as f:
+            json.dump(view(), f, default=float, separators=(",", ":"))
+        print(f"{bot.fmt(time.time())} site files written")
         return
     if args.build_static:
         os.makedirs(os.path.join(HERE, "docs", "static"), exist_ok=True)

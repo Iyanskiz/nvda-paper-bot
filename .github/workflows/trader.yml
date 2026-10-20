@@ -1,0 +1,42 @@
+# The trading bot: ONE run stays up all trading day and trades every 5 minutes (see .github/scripts/trade_loop.sh).
+# The schedule below only starts that loop; several start times are listed because GitHub skips scheduled runs
+# on busy days. While a loop is running, extra starts just wait in line and exit fast once the day is over.
+name: trader
+
+on:
+  schedule:
+    - cron: "0,20,40 13-20 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      test_minutes:
+        description: "Test only: run the loop for this many minutes even if the market is closed"
+        required: false
+        default: ""
+
+concurrency:
+  group: trader
+  cancel-in-progress: false
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    permissions:
+      contents: write   # save the account and publish live numbers
+      actions: write    # start the next run when this one nears GitHub's 6-hour limit
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TEST_MINUTES: ${{ inputs.test_minutes }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install the scanner's math libraries
+        run: pip install --quiet numpy pandas
+
+      - name: Trade every 5 minutes while the market is open
+        run: bash .github/scripts/trade_loop.sh

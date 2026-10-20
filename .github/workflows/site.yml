@@ -1,0 +1,67 @@
+# Publishes the dashboard to GitHub Pages and rebuilds the Backtest/Simulator data once a day.
+# It never trades (that's trader.yml). Live numbers reach the page through the data branch, not through this job.
+name: site
+
+on:
+  schedule:
+    - cron: "0 12,15,18 * * 1-5"   # before the open, plus backups in case GitHub skips a scheduled run
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [dashboard.html, scanner.py, bot.py, .github/workflows/site.yml]
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install the scanner's math libraries
+        run: pip install --quiet numpy pandas
+
+      - name: Today's date
+        id: date
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      # Backtest and Simulator data take several minutes to build, so build them once a day and reuse.
+      - name: Restore today's pre-built Backtest and Simulator data
+        id: static
+        uses: actions/cache@v4
+        with:
+          path: docs/static
+          key: static-v4-${{ steps.date.outputs.day }}
+
+      - name: Build Backtest and Simulator data
+        if: steps.static.outputs.cache-hit != 'true'
+        run: python scanner.py --build-static
+
+      - name: Write the dashboard files
+        run: python scanner.py --site
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

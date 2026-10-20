@@ -952,7 +952,7 @@ function renderHero(s, start) {
     chip.innerHTML = `<span class="ar" aria-hidden="true">${T.pnl >= 0 ? "▲" : "▼"}</span>${signed(T.pnl)}${fin(T.pct) ? ` (${pct(T.pct, 2)})` : ""}`;
     $("lv-today-l").textContent = !T.date || T.date >= ptDate(nowSec()) ? "today" : `on ${dayLabel(T.date)}`;
     $("lv-today-spy").innerHTML = fin(T.spy) ? `<span>S&amp;P 500 ${pct(T.spy, 2)} ${!T.date || T.date >= ptDate(nowSec()) ? "today" : "that day"}</span>` +
-      (fin(T.pct) ? `<span class="vs ${cls(T.pct - T.spy)}">${T.pct >= T.spy ? "Beating the S&amp;P 500" : "Behind the S&amp;P 500"}</span>` : "") : "";
+      (fin(T.pct) ? `<span class="vs ${cls(T.pct - T.spy)}">${Math.abs(T.pct - T.spy) < 0.0005 ? "Even with the S&amp;P 500" : T.pct > T.spy ? "Beating the S&amp;P 500" : "Behind the S&amp;P 500"}</span>` : "") : "";
   } else {
     chip.className = "chip";
     chip.textContent = "Today's change shows after the next update";

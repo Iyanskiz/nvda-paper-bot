@@ -4,6 +4,9 @@
 # never relies on them: it stays alive around the clock, idling outside market hours, and near GitHub's 6-hour job cap
 # it starts the next run of this workflow itself. The schedule is only a backup in case that chain ever breaks.
 set -u
+# Everything runs inside main(), so bash has read the whole file before the loop starts: the loop pulls new code,
+# and this file may change on disk while it runs.
+main() {
 start=$(date +%s)
 git config --global user.name "paper-bot"
 git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -17,8 +20,12 @@ in_window() {  # weekdays 13:00-21:10 UTC covers 9:00am-4:00pm New York time in 
 
 publish() {  # one commit, force-pushed, so the data branch never grows
   rm -rf /tmp/data && mkdir -p /tmp/data && cp docs/scanner.json /tmp/data/
+  [ -f docs/universe.json ] && cp docs/universe.json /tmp/data/   # the bot's view of every stock (for search)
   (cd /tmp/data && git init -q -b data && git add -A     && git commit -q -m "live data $(date -u +'%Y-%m-%d %H:%M:%S') UTC"     && git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data)     || echo "publish failed (will retry next round)"
 }
+
+mkdir -p docs   # keep the last published stock list across runs (it is rebuilt once a day)
+git fetch -q origin data && git show origin/data:universe.json > docs/universe.json 2>/dev/null || rm -f docs/universe.json
 
 last_save=0
 limit=$((330 * 60))   # hand over at 5.5 hours, before GitHub's 6-hour cap
@@ -58,3 +65,6 @@ while true; do
   fi
 done
 echo "loop finished at $(date -u +%H:%M) UTC"
+}
+main "$@"
+exit

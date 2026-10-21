@@ -21,8 +21,9 @@ Dashboard: https://iyanstockbot.vercel.app (also https://nvda-paper-bot.vercel.a
 5. Sell the morning after a holding closes below its 100-day average, and don't buy it back for 90 days. Full rebalance every few weeks.
 6. Decide after the close, trade at the next open, 0.05% cost per trade. Checks every 30 seconds during market hours.
    **Safety net:** sell right away if a holding falls 25% under its best close since buying (then a 90-day ban).
-7. **Smart leverage:** 1.25x the account while the S&P 500 trend is up (6%/yr interest on the borrowed 25%), 1.0x otherwise.
-   Backtest: 40.7%/yr (all stocks) and 51.1%/yr (600 biggest) vs 32.7% / 41.3% without, worst drop -36% / -32%.
+7. **Smart borrowing:** while the S&P 500 trend is up, 1.5x the account when the market is calm (S&P 500 20-day
+   volatility under 15%), 1.25x when normal, 1.0x when wild (over 25%) or in a downtrend; 6%/yr interest on what's borrowed.
+   Mean over 20 timings vs flat 1.25x: 70% to 81%/yr (all stocks), 51% to 58% (600 biggest); worst drops about 5 points deeper.
 8. **News:** `news.py` reads Yahoo/Nasdaq/Google headlines and SEC EDGAR filings for holdings and the next candidates.
    Serious red flags block buys and sell holdings; warnings block buys and sell only if the price confirms.
 9. **Live rescan:** all ~2,100 stocks (440+ of them foreign companies listed in the US) re-priced every 30 seconds
@@ -40,6 +41,12 @@ Dashboard: https://iyanstockbot.vercel.app (also https://nvda-paper-bot.vercel.a
 | Tight stops: 10% / 15% / 20% under the high | 3.1% / 8.5% / 18.1% | 17.7% / 22.1% / 28.4% |
 | Sell on a 5% / 8% one-day drop | 3.4% / 13.7% | 12.3% / 25.9% |
 | Hold 15 / 20 stocks | 15.5% / 13.4% | 16.1% / 13.7% |
+
+## Stock search
+
+The dashboard's search finds any stock worldwide (`vercel/api/stock.js` proxies Yahoo Finance for quotes, charts and
+headlines) and shows the bot's view of it from `universe.json`, which the bot publishes to the `data` branch at each scan.
+Deploy the function with `vercel deploy --prod` from the `vercel/` folder.
 
 ## Brokerage link (optional, `broker.py`)
 

@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#090b0f">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="iyanstockbot">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='lgA' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%233ee07a'/%3E%3Cstop offset='.55' stop-color='%2325b6d2'/%3E%3Cstop offset='1' stop-color='%230a6cff'/%3E%3C/linearGradient%3E%3ClinearGradient id='lgB' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23fff' stop-opacity='.28'/%3E%3Cstop offset='.5' stop-color='%23fff' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23lgA)'/%3E%3Crect width='64' height='64' rx='15' fill='url(%23lgB)'/%3E%3Ccircle cx='17' cy='18.5' r='4.2' fill='%23fff'/%3E%3Cpath d='M17 48V31.5L28.5 39 47 20.5' fill='none' stroke='%23fff' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M37.5 20H47.5V30' fill='none' stroke='%23fff' stroke-width='6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="icon-180.png">
 <title>iyanstockbot · Iyan Shivshankar</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -103,7 +108,9 @@
   .hero-top { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; margin-bottom: 4px; }
   .eyebrow { font-size: 13px; font-weight: 550; color: var(--text-2); }
   .status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
-  .status > span { white-space: nowrap; }
+  .status { flex: 0 0 auto; max-width: 100%; }
+  .status.live { display: inline-flex; width: auto; height: auto; border-radius: 0; background: none; animation: none; }
+  .status > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
   .status.live .dot { background: var(--up); animation: pulse 2s infinite; }
   .status.err { color: var(--down); } .status.err .dot { background: var(--down); }
@@ -364,15 +371,161 @@
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(47, 212, 124, .5); } 70% { box-shadow: 0 0 0 7px rgba(47, 212, 124, 0); } 100% { box-shadow: 0 0 0 0 rgba(47, 212, 124, 0); } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
+
+<style>
+  /* ================================================================ Apple-style layer (Stocks-app dark) */
+  :root {
+    --bg: #000; --surface: #1c1c1e; --surface-2: #2c2c2e; --surface-3: #3a3a3c;
+    --line: rgba(84, 84, 88, .42); --line-2: rgba(84, 84, 88, .7);
+    --text: #fff; --text-2: rgba(235, 235, 245, .74); --muted: rgba(235, 235, 245, .52);
+    --up: #30d158; --up-bg: rgba(48, 209, 88, .15); --up-line: rgba(48, 209, 88, .4);
+    --down: #ff453a; --down-bg: rgba(255, 69, 58, .15); --down-line: rgba(255, 69, 58, .4);
+    --warn: #ff9f0a; --warn-bg: rgba(255, 159, 10, .14); --warn-line: rgba(255, 159, 10, .4);
+    --accent: #0a84ff; --accent-bg: rgba(10, 132, 255, .16);
+    --r-xl: 22px; --r-lg: 18px; --r-md: 14px; --r-sm: 10px;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", system-ui, "Segoe UI", Roboto, sans-serif;
+    --spring: cubic-bezier(.32, .72, 0, 1); --ease: cubic-bezier(.2, .8, .2, 1);
+  }
+  html { scroll-behavior: smooth; }
+  body { background: #000; letter-spacing: -.011em; }
+  ::selection { background: rgba(10, 132, 255, .45); }
+
+  /* the blur lives on a pseudo-element: a backdrop-filter on .top itself would trap the fixed bottom tab bar inside it */
+  .top, .top[class] { position: sticky; top: 0; z-index: 30; border-bottom: .5px solid var(--line-2); background: transparent;
+                      -webkit-backdrop-filter: none; backdrop-filter: none; isolation: isolate; }
+  .top::before { content: ""; position: absolute; inset: 0; z-index: -1; background: rgba(0, 0, 0, .7);
+                 -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px); }
+  .top-in { min-height: 58px; padding-top: max(10px, env(safe-area-inset-top)); }
+  .brand { font-weight: 700; font-size: 17px; letter-spacing: -.022em; }
+  .logo { width: 34px; height: 34px; flex: none; border-radius: 9px; box-shadow: 0 4px 14px rgba(10, 132, 255, .28); }
+  .brand-t .owner { font-weight: 500; letter-spacing: -.005em; }
+  .paper { font-size: 10.5px; letter-spacing: .04em; border: 0; background: var(--warn-bg); padding: 4px 9px; }
+  .tabs { background: rgba(118, 118, 128, .24); border: 0; padding: 3px; gap: 0; }
+  .tabs button { min-height: 34px; font-weight: 600; font-size: 13.5px; color: var(--text); opacity: .8;
+                 transition: background .35s var(--spring), opacity .2s, transform .25s var(--ease); }
+  .tabs button.on { background: #636366; opacity: 1; box-shadow: 0 3px 8px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(0, 0, 0, .1); }
+  @media (max-width: 860px) {
+    .tabs { background: rgba(22, 22, 24, .78); -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+            border-top: .5px solid var(--line-2); padding-top: 4px; }
+    .tabs button, .tabs button.on { background: transparent; box-shadow: none; opacity: 1; color: rgba(235, 235, 245, .45); font-size: 10.5px; font-weight: 600; }
+    .tabs button.on, .tabs button.on svg { color: var(--accent); }
+    .tabs svg { width: 25px; height: 25px; transition: transform .35s var(--spring); }
+    .tabs button.on svg { transform: scale(1.08); }
+  }
+
+  .sx-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 0; border-radius: 11px;
+            background: rgba(118, 118, 128, .24); color: var(--muted); font: inherit; font-size: 14px; cursor: pointer;
+            transition: background .2s, transform .25s var(--ease); }
+  .sx-btn:hover { background: rgba(118, 118, 128, .32); color: var(--text-2); }
+  .sx-btn kbd { font: 600 11px var(--font); padding: 1px 6px; border-radius: 5px; background: rgba(255, 255, 255, .1); color: var(--muted); }
+  @media (max-width: 860px) {
+    .sx-btn { margin-left: auto; width: 38px; height: 38px; padding: 0; justify-content: center; border-radius: 50%; color: var(--text); }
+    .sx-btn span, .sx-btn kbd { display: none; }
+  }
+  @media (min-width: 861px) { .sx-btn { margin-left: 12px; min-width: 210px; } .tabs { margin-left: auto; } }
+
+  .page-h h1 { font-size: 34px; font-weight: 800; letter-spacing: -.035em; }
+  .card { border: 0; border-radius: var(--r-xl); background: var(--surface); }
+  .card-h h2 { font-size: 19px; font-weight: 700; letter-spacing: -.025em; }
+  .mini, .tile, .check { border: 0; }
+  .mini { background: var(--surface); border-radius: var(--r-lg); }
+  .hero-value { font-weight: 700; letter-spacing: -.045em; }
+  .eyebrow { font-size: 15px; font-weight: 600; color: var(--muted); }
+  .chip { font-weight: 700; }
+  .pill { border-radius: 8px; font-weight: 700; min-width: 68px; height: 28px; font-size: 13px; }
+  .pill.up { background: var(--up); color: #fff; } .pill.down { background: var(--down); color: #fff; }
+  .pill.sm { height: 24px; min-width: 60px; font-size: 12px; }
+  .seg { background: rgba(118, 118, 128, .24); border: 0; padding: 2px; border-radius: 10px; }
+  .seg button { min-height: 32px; border-radius: 8px; color: var(--text); opacity: .75; transition: background .35s var(--spring), opacity .2s; }
+  .seg button.on { background: #636366; opacity: 1; box-shadow: 0 3px 8px rgba(0, 0, 0, .3); }
+  .btn { border: 0; border-radius: 12px; background: rgba(118, 118, 128, .24); }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .list > .item { border-top: .5px solid var(--line); }
+  .tbl th { background: var(--surface); } .tbl td, .tbl th { border-bottom: .5px solid var(--line); }
+  .rule { border: 0; background: var(--surface-2); }
+  .callout { border: 0; }
+
+  /* motion: springy, quick, never in the way */
+  .view { animation: viewIn .45s var(--spring); }
+  @keyframes viewIn { from { opacity: 0; transform: translateY(14px) scale(.992); } to { opacity: 1; transform: none; } }
+  .card, .mini, .hero { transition: transform .35s var(--spring), background .2s; }
+  summary, .btn, .tabs button, .seg button, .sx-btn, .sx-row { -webkit-tap-highlight-color: transparent; }
+  summary:active, .btn:active, .tabs button:active, .seg button:active, .sx-btn:active, .sx-row:active { transform: scale(.975); }
+  summary { transition: transform .25s var(--ease), background .2s; border-radius: 12px; }
+  details.item > summary:hover { background: rgba(255, 255, 255, .03); }
+  .drawer { animation: drawerIn .38s var(--spring); }
+  @keyframes drawerIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+  .chev::before { transition: transform .35s var(--spring); }
+  .layout > .col > *, .layout > * { animation: rise .55s var(--spring) both; }
+  .o1 { animation-delay: 0s; } .o2 { animation-delay: .04s; } .o3 { animation-delay: .08s; } .o4 { animation-delay: .12s; } .o5 { animation-delay: .16s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+
+  /* ================================================================ search sheet */
+  .sheet-bg { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, .5); opacity: 0; transition: opacity .35s var(--ease); }
+  .sheet-bg.on { opacity: 1; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; height: calc(100% - max(28px, env(safe-area-inset-top)));
+           display: flex; flex-direction: column; background: #1c1c1e; border-radius: 14px 14px 0 0; overflow: hidden;
+           transform: translateY(100%); transition: transform .5s var(--spring); box-shadow: 0 -10px 40px rgba(0, 0, 0, .5); }
+  .sheet.on { transform: none; }
+  @media (min-width: 861px) {
+    .sheet { left: 50%; right: auto; bottom: auto; top: 6vh; width: min(720px, 92vw); height: 88vh; border-radius: 22px;
+             transform: translate(-50%, 24px) scale(.97); opacity: 0; transition: transform .45s var(--spring), opacity .25s var(--ease); }
+    .sheet.on { transform: translate(-50%, 0); opacity: 1; }
+    .sheet-grab { display: none; }
+  }
+  .sheet-grab { width: 38px; height: 5px; border-radius: 3px; background: rgba(235, 235, 245, .3); margin: 7px auto 0; flex: none; }
+  .sx-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; flex: none; }
+  .sx-field { flex: 1; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 11px; border-radius: 11px;
+              background: rgba(118, 118, 128, .24); color: var(--muted); min-width: 0; }
+  .sx-field input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; color: var(--text); font: 17px var(--font); letter-spacing: -.02em; }
+  .sx-field input::-webkit-search-cancel-button { filter: invert(.6); }
+  .sx-cancel { border: 0; background: none; color: var(--accent); font: 600 17px var(--font); cursor: pointer; padding: 6px 2px; }
+  .sx-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 4px 16px calc(24px + env(safe-area-inset-bottom)); }
+  .sx-sec { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .02em; margin: 14px 4px 6px; }
+  .sx-list { background: #2c2c2e; border-radius: 14px; overflow: hidden; }
+  .sx-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; width: 100%; min-height: 60px;
+            padding: 9px 14px; border: 0; border-top: .5px solid var(--line); background: transparent; color: inherit; font: inherit;
+            text-align: left; cursor: pointer; transition: background .15s, transform .25s var(--ease); }
+  .sx-row:first-child { border-top: 0; }
+  .sx-row:hover { background: rgba(255, 255, 255, .04); }
+  .sx-row .sym { font-size: 17px; font-weight: 700; }
+  .sx-row .name { font-size: 13px; }
+  .bv { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 8px; font-size: 12px; font-weight: 700; white-space: nowrap;
+        background: rgba(118, 118, 128, .24); color: var(--text-2); }
+  .bv.own { background: var(--accent); color: #fff; } .bv.buy { background: var(--up); color: #fff; } .bv.ok { background: var(--up-bg); color: var(--up); }
+  .bv.no { background: var(--down-bg); color: var(--down); }
+  .sx-hint { color: var(--muted); font-size: 14px; text-align: center; padding: 28px 10px; }
+  .sx-back { border: 0; background: none; color: var(--accent); font: 17px var(--font); padding: 8px 0; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+  .sx-d { animation: viewIn .45s var(--spring); }
+  .sx-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+  .sx-title h2 { font-size: 30px; font-weight: 800; letter-spacing: -.035em; margin: 0; }
+  .sx-title span { color: var(--muted); font-size: 15px; }
+  .sx-price { font-size: 40px; font-weight: 700; letter-spacing: -.04em; margin: 8px 0 4px; font-variant-numeric: tabular-nums; }
+  .sx-chg { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .sx-chart { position: relative; height: 230px; margin: 14px 0 8px; }
+  .sx-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-radius: 14px; overflow: hidden; margin-top: 12px; }
+  @media (min-width: 560px) { .sx-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .sx-stats div { background: #2c2c2e; padding: 10px 14px; }
+  .sx-stats dt { font-size: 12px; color: var(--muted); } .sx-stats dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .sx-bot { margin-top: 14px; padding: 14px 16px; border-radius: 16px; background: #2c2c2e; }
+  .sx-bot h3 { margin: 0 0 6px; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .sx-bot p { margin: 0; color: var(--text-2); font-size: 14.5px; line-height: 1.45; }
+  .sx-news a { display: block; padding: 12px 14px; border-top: .5px solid var(--line); color: var(--text); text-decoration: none; font-size: 15px; font-weight: 550; line-height: 1.35; }
+  .sx-news a:first-child { border-top: 0; } .sx-news a span { display: block; margin-top: 3px; font-size: 12.5px; color: var(--muted); font-weight: 400; }
+  .sx-news a:hover { background: rgba(255, 255, 255, .04); }
+  body.sx-lock { overflow: hidden; }
+  @media (prefers-reduced-motion: reduce) { .sheet, .sheet-bg { transition: none; } }
+</style>
 </head>
 <body>
 <header class="top">
   <div class="top-in">
     <div class="brand">
-      <span class="mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg></span>
+      <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lgA" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3ee07a"/><stop offset=".55" stop-color="#25b6d2"/><stop offset="1" stop-color="#0a6cff"/></linearGradient><linearGradient id="lgB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#lgA)"/><rect width="64" height="64" rx="15" fill="url(#lgB)"/><circle cx="17" cy="18.5" r="4.2" fill="#fff"/><path d="M17 48V31.5L28.5 39 47 20.5" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37.5 20H47.5V30" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span class="brand-t"><span>iyanstockbot</span><span class="owner">Iyan Shivshankar</span></span>
     </div>
-    <span class="paper" title="No real money is used">PAPER MONEY ONLY</span>
+    <span class="paper" title="No real money is used">PAPER MONEY</span>
+    <button class="sx-btn" id="sx-open" type="button" aria-label="Search any stock"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="20.5" y2="20.5"/></svg><span>Search stocks</span><kbd>/</kbd></button>
     <nav class="tabs" aria-label="Sections">
       <button data-tab="live" class="on" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 12 7 12 10 5 14 19 17 12 21 12"/></svg><span>Live portfolio</span></button>
       <button data-tab="sim"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polygon points="10 8.5 15.5 12 10 15.5 10 8.5"/></svg><span>Simulator</span></button>
@@ -658,6 +811,17 @@
     </div>
   </section>
 
+  <div class="sheet-bg" id="sx-bg" hidden></div>
+  <section class="sheet" id="sx" role="dialog" aria-modal="true" aria-label="Search stocks" hidden>
+    <div class="sheet-grab" aria-hidden="true"></div>
+    <div class="sx-head">
+      <label class="sx-field"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="20.5" y2="20.5"/></svg>
+        <input id="sx-q" type="search" placeholder="Any stock: ticker or company" autocomplete="off" spellcheck="false" enterkeyhint="search" aria-label="Search any stock"></label>
+      <button class="sx-cancel" id="sx-close" type="button">Done</button>
+    </div>
+    <div class="sx-body" id="sx-body"></div>
+  </section>
+
   <p class="foot">iyanstockbot by Iyan Shivshankar. Paper money only: no real money is invested, and nothing here is investment advice. All times are Pacific (PT).</p>
 </main>
 
@@ -709,10 +873,10 @@ function setHTML(el, html) {
 }
 
 // ================================================================ charts
-const C = {up: "#2fd47c", down: "#ff6369", bot: "#3987e5", spy: "#8a93a3", ew: "#c98500", grid: "rgba(255,255,255,.06)"};
-Chart.defaults.color = "#8690a2";
+const C = {up: "#30d158", down: "#ff453a", bot: "#0a84ff", spy: "#8e8e93", ew: "#ff9f0a", grid: "rgba(255,255,255,.07)"};
+Chart.defaults.color = "rgba(235,235,245,.5)";
 Chart.defaults.borderColor = C.grid;
-Chart.defaults.font.family = "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif";
+Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', Inter, system-ui, 'Segoe UI', sans-serif";
 Chart.defaults.font.size = 11;
 Chart.register({id: "crosshair", afterDatasetsDraw(chart) {   // vertical hairline at the hovered day/minute
   const act = chart.tooltip && chart.tooltip.getActiveElements ? chart.tooltip.getActiveElements() : [];
@@ -729,7 +893,7 @@ const fadeFill = hex => ctx => {
   return g;
 };
 const line = (label, data, color, extra = {}) => Object.assign({label, data, borderColor: color, backgroundColor: color,
-  borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4, pointHoverBorderWidth: 2, pointHoverBorderColor: "#11141a",
+  borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, pointHoverBorderWidth: 2, pointHoverBorderColor: "#11141a",
   pointHoverBackgroundColor: color, tension: 0, spanGaps: true}, extra);
 const tickMoney = v => v >= 100000 ? "$" + Math.round(v / 1000) + "k" : "$" + Math.round(v).toLocaleString("en-US");
 const logFmt = Chart.Ticks && Chart.Ticks.formatters && Chart.Ticks.formatters.logarithmic;
@@ -978,10 +1142,24 @@ function renderLive(s) {
   });
 }
 
+// the big number glides to its new value instead of jumping
+function tweenMoney(el, to) {
+  const from = Number(el.dataset.v);
+  el.dataset.v = to;
+  if (!fin(from) || !fin(to) || from === to || matchMedia("(prefers-reduced-motion: reduce)").matches) { el.textContent = money(to); return; }
+  const t0 = performance.now(), dur = 900;
+  const step = now => {
+    const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 4);
+    el.textContent = money(from + (to - from) * e);
+    if (k < 1 && Number(el.dataset.v) === to) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 function renderHero(s, start) {
   const eq = $("lv-eq");
   eq.classList.remove("skel");
-  eq.textContent = money(s.equity_now);
+  tweenMoney(eq, s.equity_now);
   const T = todayStats(s), chip = $("lv-today");
   if (T && fin(T.pnl)) {
     chip.className = "chip " + cls(T.pnl);
@@ -1070,6 +1248,7 @@ function renderHoldings(s, P) {
             instantly if the price falls 25% under its best close since buying.</p></div>
         ${st ? `<p class="kv"><span>Latest scan</span>${esc(st)}</p>` : ""}
         <p class="kv"><span>Why it was bought</span>${esc(h.reason)}</p>
+        <button class="btn wide" type="button" data-open-stock="${esc(sym)}">Chart, stats and news for ${esc(sym)}</button>
         ${newsBlock(s, sym)}
       </div></details>`;
   }).join("") || `<div class="item">${empty("Nothing owned yet",
@@ -1099,7 +1278,7 @@ function renderRescan(s) {
   $("lv-rescan-changes").innerHTML = (RS.changes || []).map(c => { const [g, k] = icon(String(c));
     return `<li><span class="ci ${k}" aria-hidden="true">${g}</span><span>${esc(c)}</span></li>`; }).join("") ||
     `<li><span class="ci" aria-hidden="true">✓</span><span>No changes on the last rescan.</span></li>`;
-  $("lv-rescan-top").innerHTML = (RS.top || []).map(r => `<div class="lb"><span class="rk">${esc(r.rank)}</span>
+  $("lv-rescan-top").innerHTML = (RS.top || []).map(r => `<div class="lb" data-open-stock="${esc(r.sym)}" style="cursor:pointer"><span class="rk">${esc(r.rank)}</span>
       <div class="who"><div class="t1"><span class="sym">${esc(r.sym)}</span>${r.held ? '<span class="tag">owned</span>' : ""}${newsBadge(s, r.sym)}</div>
         <div class="name">${esc(r.name)}</div></div>
       <span class="px num">${money(r.live_price)}</span><span class="pill sm ${cls(r.live_change)}">${pct(r.live_change)}</span></div>`).join("") ||
@@ -1331,6 +1510,145 @@ showTab(location.hash.slice(1) || "live");
 drawLiveChart();   // marks the saved range button before data arrives
 loadTrack().then(loadLive);
 loadRules();
+
+// ================================================================ search any stock
+const STOCK_API = /vercel\.app$/.test(location.hostname) ? "/api/stock" : "https://iyanstockbot.vercel.app/api/stock";
+const SX = {uni: null, map: null, chart: null, timer: 0, seq: 0, range: "6mo", sym: null};
+async function sxUniverse() {
+  if (SX.uni) return SX.uni;
+  const urls = new URLSearchParams(location.search).has("local") ? ["universe.json"]
+    : [DATA_RAW.replace("scanner.json", "universe.json") + "?t=" + Math.floor(Date.now() / 600000), "universe.json"];
+  for (const u of urls) {
+    try {
+      const d = await getJSON(u);
+      SX.uni = d.rows.map(r => Object.fromEntries(d.cols.map((c, i) => [c, r[i]])));
+      SX.uniDate = d.date; SX.passed = d.passed;
+      SX.map = Object.fromEntries(SX.uni.map(x => [x.sym, x]));
+      return SX.uni;
+    } catch (e) {}
+  }
+  SX.uni = []; SX.map = {};
+  return SX.uni;
+}
+function botBadge(sym) {
+  const own = LIVE && LIVE.book && LIVE.book.pos && LIVE.book.pos[sym], u = SX.map && SX.map[sym];
+  if (own) return `<span class="bv own">Owned</span>`;
+  if (u && u.rank) return `<span class="bv ${u.rank <= ((LIVE && LIVE.params && LIVE.params.n) || 7) ? "buy" : "ok"}">#${esc(u.rank)}</span>`;
+  if (u) return `<span class="bv no">Skipped</span>`;
+  return `<span class="bv">Not scanned</span>`;
+}
+const sxRow = (sym, name, extra = "") => `<button class="sx-row" type="button" data-sym="${esc(sym)}"><div class="who">
+  <div class="t1"><span class="sym">${esc(sym)}</span></div><div class="name">${esc(name || "")}${extra ? " · " + esc(extra) : ""}</div></div>${botBadge(sym)}</button>`;
+function sxHome() {
+  const pos = Object.keys((LIVE && LIVE.book && LIVE.book.pos) || {});
+  const top = (SX.uni || []).filter(x => x.rank).sort((a, b) => a.rank - b.rank).slice(0, 10);
+  $("sx-body").innerHTML = (pos.length ? `<div class="sx-sec">Iyan's holdings</div><div class="sx-list">${pos.map(s => sxRow(s, nameOf(LIVE, s))).join("")}</div>` : "") +
+    (top.length ? `<div class="sx-sec">Bot's top picks right now</div><div class="sx-list">${top.map(x => sxRow(x.sym, x.name, x.sector)).join("")}</div>` : "") +
+    `<p class="sx-hint">Search any stock in the world by ticker or company name.<br>Badges show what the bot thinks: Owned, its rank (#), Skipped, or Not scanned.</p>`;
+}
+async function sxSearch(q) {
+  const my = ++SX.seq;
+  q = q.trim();
+  if (!q) return sxHome();
+  const Q = q.toUpperCase(), ql = q.toLowerCase();
+  const local = (SX.uni || []).filter(x => x.sym.startsWith(Q) || (x.name || "").toLowerCase().includes(ql))
+    .sort((a, b) => (b.sym === Q) - (a.sym === Q) || (b.sym.startsWith(Q)) - (a.sym.startsWith(Q)) || (a.rank || 1e9) - (b.rank || 1e9)).slice(0, 8);
+  const draw = (remote = [], loading = false) => {
+    if (my !== SX.seq) return;
+    const seen = new Set(local.map(x => x.sym));
+    const more = remote.filter(x => !seen.has(x.sym)).slice(0, 8);
+    $("sx-body").innerHTML = (local.length ? `<div class="sx-sec">On the bot's list</div><div class="sx-list">${local.map(x => sxRow(x.sym, x.name, x.sector)).join("")}</div>` : "") +
+      (more.length ? `<div class="sx-sec">Worldwide</div><div class="sx-list">${more.map(x => sxRow(x.sym, x.name, x.exchange)).join("")}</div>` : "") +
+      (loading ? `<p class="sx-hint">Searching worldwide...</p>` : !local.length && !more.length ? `<p class="sx-hint">No stocks match "${esc(q)}".</p>` : "");
+  };
+  draw([], true);
+  try { const r = await getJSON(`${STOCK_API}?q=${encodeURIComponent(q)}`); draw(r.quotes || []); } catch (e) { draw([]); }
+}
+function botVerdict(sym) {
+  const own = LIVE && LIVE.book && LIVE.book.pos && LIVE.book.pos[sym], u = SX.map && SX.map[sym], n = (LIVE && LIVE.params && LIVE.params.n) || 7;
+  let head, body;
+  if (own) {
+    const v = own.shares * own.last, g = own.last / own.entry - 1;
+    head = `<span class="bv own">Owned</span> Iyan's bot owns this`;
+    body = `${Number(own.shares).toFixed(2)} shares worth ${money(v)} (${pct(g)} since ${dayLabel(own.date)}). ` +
+      (fin(own.stop) ? `Safety net at ${money(own.stop)}. ` : "") + `Bought because: ${esc(own.reason)}`;
+  } else if (u && u.rank) {
+    head = `<span class="bv ${u.rank <= n ? "buy" : "ok"}">#${esc(u.rank)}</span> ` + (u.rank <= n ? "A top pick" : "Passes every filter");
+    body = u.rank <= n ? `One of the ${n} strongest steady uptrends in the market right now. If it's still in the top ${n} at the next rebalance, the bot buys it.`
+      : `Ranked #${u.rank} of ${int(SX.passed)} stocks that pass every filter. The bot buys only the top ${n}.`;
+  } else if (u) {
+    head = `<span class="bv no">Skipped</span> The bot won't buy this now`;
+    body = `Reason: ${esc(u.why_not || "outside the ranking")}.`;
+  } else {
+    head = `<span class="bv">Not scanned</span> Outside the bot's list`;
+    body = "The bot only trades US-listed companies worth $2B+, priced $5+, with $50M+ traded a day.";
+  }
+  const facts = u ? `<p style="margin-top:8px">90-day move <b class="${cls(u.gain90)}">${pct(u.gain90)}</b> · smoothness ${fin(u.smooth) ? u.smooth.toFixed(2) : NA} of 1 · ` +
+    `${fin(u.of_high) ? Math.round(u.of_high * 100) + "% of its 52-week high" : ""} · 100-day average ${money(u.ma100)}` +
+    (SX.uniDate ? ` <span class="muted">(scan of ${dayLabel(SX.uniDate)})</span>` : "") + `</p>` : "";
+  return `<div class="sx-bot"><h3>${head}</h3><p>${body}</p>${facts}</div>`;
+}
+async function sxOpenStock(sym, range = SX.range) {
+  SX.sym = sym; SX.range = range;
+  const my = ++SX.seq, u = SX.map && SX.map[sym];
+  if (!$("sx-detail") || $("sx-detail").dataset.sym !== sym) {
+    $("sx-body").innerHTML = `<div class="sx-d" id="sx-detail" data-sym="${esc(sym)}"><button class="sx-back" type="button" id="sx-back">‹ Search</button>
+      <div class="sx-title"><h2>${esc(sym)}</h2><span id="sx-name">${esc(u ? u.name : "")}</span></div>
+      <div class="sx-price" id="sx-price">&nbsp;</div><div class="sx-chg" id="sx-chg">&nbsp;</div>
+      <div class="seg" id="sx-range" role="group" aria-label="Chart range" style="margin-top:14px">${["1d", "5d", "1mo", "6mo", "1y", "5y"].map(r =>
+        `<button type="button" data-r="${r}">${r.replace("mo", "M").replace("d", "D").replace("y", "Y")}</button>`).join("")}</div>
+      <div class="sx-chart"><canvas id="sx-c"></canvas></div><div id="sx-stats"></div>${botVerdict(sym)}<div id="sx-news"></div></div>`;
+    $("sx-back").onclick = () => { SX.sym = null; sxSearch($("sx-q").value); };
+    $("sx-range").onclick = e => { const b = e.target.closest("button"); if (b) sxOpenStock(sym, b.dataset.r); };
+  }
+  document.querySelectorAll("#sx-range button").forEach(b => b.classList.toggle("on", b.dataset.r === range));
+  let d;
+  try { d = await getJSON(`${STOCK_API}?s=${encodeURIComponent(sym)}&range=${range}`); }
+  catch (e) { if (my === SX.seq) $("sx-chg").innerHTML = `<span class="muted">Couldn't load prices right now. Try again in a moment.</span>`; return; }
+  if (my !== SX.seq) return;
+  const pts = d.points || [], first = range === "1d" ? d.prev : pts.length ? pts[0][1] : d.prev, chg = fin(first) ? d.price - first : null;
+  $("sx-name").textContent = `${d.name || ""}${d.exchange ? " · " + d.exchange : ""}`;
+  $("sx-price").textContent = (d.currency && d.currency !== "USD" ? d.currency + " " : "") + Number(d.price).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const lbl = {"1d": "today", "5d": "past 5 days", "1mo": "past month", "6mo": "past 6 months", "1y": "past year", "5y": "past 5 years"}[range];
+  $("sx-chg").innerHTML = fin(chg) ? `<span class="${cls(chg)}">${chg >= 0 ? "+" : MINUS}${Math.abs(chg).toFixed(2)} (${pct(chg / first, 2)})</span> <span class="muted">${lbl}</span>` : "";
+  const col = !fin(chg) || chg >= 0 ? C.up : C.down;
+  const labels = pts.map(p => range === "1d" || range === "5d" ? ptShort(p[0]) : dayLabel(new Date(p[0] * 1000).toISOString().slice(0, 10)));
+  if (SX.chart) SX.chart.destroy();
+  SX.chart = new Chart($("sx-c"), {type: "line", data: {labels, datasets: [line(d.sym, pts.map(p => p[1]), col, {fill: true, backgroundColor: fadeFill(col)})]},
+    options: Object.assign(chartOpts(), {animation: {duration: 500, easing: "easeOutQuart"}, plugins: {legend: {display: false},
+      tooltip: Object.assign(tooltip(), {callbacks: {label: c => " " + Number(c.parsed.y).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2})}})},
+      scales: {x: {display: false}, y: {position: "right", border: {display: false}, grid: {color: C.grid}, ticks: {maxTicksLimit: 5}}}})});
+  const f = v => fin(v) ? Number(v).toLocaleString("en-US", {maximumFractionDigits: 2}) : NA;
+  $("sx-stats").innerHTML = `<dl class="sx-stats"><div><dt>Day range</dt><dd>${f(d.dayLow)} – ${f(d.dayHigh)}</dd></div>
+    <div><dt>52-week range</dt><dd>${f(d.low52)} – ${f(d.high52)}</dd></div><div><dt>Volume</dt><dd>${int(d.volume)}</dd></div></dl>`;
+  $("sx-news").innerHTML = (d.news || []).length ? `<div class="sx-sec">News</div><div class="sx-list sx-news">${d.news.map(n =>
+    `<a href="${esc(n.link)}" target="_blank" rel="noopener">${esc(n.title)}<span>${esc(n.publisher || "")}${n.t ? " · " + ago(n.t) : ""}</span></a>`).join("")}</div>` : "";
+}
+function sxOpen() {
+  const sh = $("sx"), bg = $("sx-bg");
+  sh.hidden = false; bg.hidden = false; document.body.classList.add("sx-lock");
+  requestAnimationFrame(() => requestAnimationFrame(() => { sh.classList.add("on"); bg.classList.add("on"); }));
+  setTimeout(() => $("sx-q").focus({preventScroll: true}), 120);
+  if (!SX.sym) sxUniverse().then(() => { if (!SX.sym) sxSearch($("sx-q").value); });
+}
+function sxClose() {
+  const sh = $("sx"), bg = $("sx-bg");
+  sh.classList.remove("on"); bg.classList.remove("on"); document.body.classList.remove("sx-lock");
+  setTimeout(() => { if (!sh.classList.contains("on")) { sh.hidden = true; bg.hidden = true; } }, 450);
+}
+$("sx-open").onclick = sxOpen;
+$("sx-close").onclick = sxClose;
+$("sx-bg").onclick = sxClose;
+$("sx-q").oninput = e => { clearTimeout(SX.timer); SX.sym = null; SX.timer = setTimeout(() => sxSearch(e.target.value), 180); };
+$("sx-q").onkeydown = e => { if (e.key === "Enter") { const r = $("sx-body").querySelector(".sx-row"); if (r) r.click(); } };
+$("sx-body").onclick = e => { const r = e.target.closest(".sx-row"); if (r) { $("sx-q").blur(); sxOpenStock(r.dataset.sym); } };
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("sx").classList.contains("on")) sxClose();
+  else if (e.key === "/" && !/input|textarea|select/i.test(document.activeElement.tagName)) { e.preventDefault(); sxOpen(); }
+});
+// open a stock from anywhere on the page: any element with data-open-stock
+document.addEventListener("click", e => { const el = e.target.closest("[data-open-stock]"); if (el) { sxOpen(); sxUniverse().then(() => sxOpenStock(el.dataset.openStock)); } });
+
 setInterval(loadLive, 120000);  // every 2 minutes keeps us under the GitHub API limit
 document.addEventListener("visibilitychange", () => {   // phone back from the background: refresh if the data is over a minute old
   if (!document.hidden && Date.now() - LAST_FETCH > 60000) loadLive();

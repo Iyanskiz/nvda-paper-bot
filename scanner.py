@@ -42,6 +42,8 @@ PARAMS = dict(
     band=0.10,           # only resize a holding at a rebalance if it's 10%+ off its target (saves fees)
     phase=0,             # which week of the cycle it rebalances in
     leverage=1.25,       # while the S&P 500 trend is up, invest 1.25x the account (borrowing 25%); 1.0x when it's down
+    vol_lev=[[0.15, 1.5], [0.25, 1.25], [9.0, 1.0]],  # ...refined by how calm the market is: S&P 500 20-day volatility
+                         # under 15% -> 1.5x, 15-25% -> 1.25x, wilder -> no borrowing (beat flat 1.25x in 100% of timings)
     margin_rate=0.06,    # yearly interest on borrowed money
     cooldown_days=90,    # after selling on a broken trend, move on: no rebuy for 90 days (free in tests; "forever" cost 2-4%/yr)
 )
@@ -137,6 +139,7 @@ def indicators(P, p=PARAMS):
         dvol=(C * V).rolling(20).mean(),
         regime=(spy > spy.rolling(p["regime_ma"]).mean()) if p["regime_ma"] else pd.Series(True, index=spy.index),
         spy_ma=spy.rolling(p["regime_ma"] or 200).mean(),
+        spy_vol=spy.pct_change().rolling(20).std() * math.sqrt(252),
     )
 
 
@@ -357,13 +360,22 @@ def mark(book, closes, atr, p=PARAMS):
 
 # ---------------------------------------------------------------- backtest
 
+def lev_for(regime, spy_vol, p=PARAMS):
+    """How much of the account to invest: no borrowing in a downtrend, more in calm markets, less in wild ones."""
+    if not regime:
+        return 1.0
+    if p.get("vol_lev") and np.isfinite(spy_vol):
+        return next(L for thr, L in p["vol_lev"] if spy_vol < thr)
+    return p.get("leverage", 1.0)
+
+
 def backtest(P, ind, p=PARAMS, start=260):
     book = new_book()
     dates = P["C"].index
     curve = []
     p = dict(p)
     for t in range(start, len(dates)):
-        p["lev_now"] = p.get("leverage", 1.0) if bool(ind["regime"].iloc[t - 1]) else 1.0
+        p["lev_now"] = lev_for(bool(ind["regime"].iloc[t - 1]), float(ind["spy_vol"].iloc[t - 1]), p)
         if book["cash"] < 0:  # interest on borrowed money, one trading day
             book["cash"] -= -book["cash"] * p.get("margin_rate", 0.06) / 252
         row = lambda k: P[k].iloc[t].to_dict()
@@ -620,9 +632,11 @@ RULES = [
          source="Tested here, averaged over 20 rebalance timings", evidence="With score weights: 25.8% to 29.8%/yr and worst drop -51% to -41% (all stocks); 36.9% to 39.2%/yr (600 biggest). It triggers only a few times a year."),
     dict(kept=False, rule="Monthly learning that switches to whatever settings won over the last 12 months.",
          source="Walk-forward test over 4 rebalance timings", evidence="30-31%/yr vs 49% for the fixed rules (all stocks) and 37-39% vs 39% (600 biggest). Its earlier win was luck of one timing. It now runs as a monthly report only."),
-    dict(kept=True, rule="While the S&P 500 trend is up, invest 1.25x the account (borrowing 25% at 6% a year); no borrowing when it's down.",
-         source="Tested here (smart-risk experiment)",
-         evidence="7-stock rules: 32.7% to 40.7%/yr (all stocks) and 41.3% to 51.1%/yr (600 biggest); worst drop -30% to -36% and -26% to -32%. 1.5x earned more but drops reached -44% to -58%."),
+    dict(kept=True, rule="Smart borrowing: while the S&P 500 trend is up, invest 1.5x the account when the market is calm (S&P 500 20-day swings under 15% a year), 1.25x when normal, and no borrowing when it's wild (over 25%) or the trend is down. 6% a year interest on what's borrowed.",
+         source="Training round, Oct 21 2026 (mean over 20 rebalance timings)",
+         evidence="vs flat 1.25x: all stocks 70% to 81%/yr, 600 biggest 51% to 58%/yr, ahead in 100% of timings. Average worst drop deepens from -39%/-44% to -44%/-48%: more profit for more risk, taken only when markets are calm. Flat 1.5x made about the same but with deeper drops."),
+    dict(kept=False, rule="Sector limits (at most 2-3 stocks from one industry).", source="Training round, Oct 21 2026",
+         evidence="Helped on all stocks (+3%/yr with a cap of 3) but hurt on the 600 biggest (-2%/yr). Not reliable."),
     dict(kept=True, rule="Read company news and SEC filings for every holding and the next candidates: serious red flags (bankruptcy, delisting, restatement, going concern, fraud action, FDA rejection) block buys and sell holdings; warnings (offerings, guidance cuts, short reports) block buys and sell only if the price falls 5%+ vs the market.",
          source="Chan 2003; Tetlock et al. 2008; Loughran & McDonald 2011; event studies on offerings, restatements, bankruptcy",
          evidence="Bad news drifts for weeks; good news is priced in within hours, so good news only breaks ties. Not backtested here (no free headline history); a protective rule."),
@@ -640,7 +654,7 @@ RULES = [
          evidence="15%: 24% to 15%/yr; 20%: 24% to 23%/yr. It sold near bottoms and missed the rebounds."),
     dict(kept=False, rule="Rank by nearness to the 52-week high alone.", source="George & Hwang",
          evidence="About 0% a year as a stand-alone ranking."),
-    dict(kept=False, rule="Borrow more: 1.5x or 1.75x instead of 1.25x.", source="Training round, Oct 20 2026",
+    dict(kept=False, rule="Borrow 1.5x or 1.75x all the time, whatever the market mood.", source="Training round, Oct 20 2026",
          evidence="More profit (all stocks 35% to 39-42%/yr) but the average worst drop went from -42% to -48% and -54%. Too much risk."),
     dict(kept=False, rule="Hold many more stocks (10, 15, 25).", source="Training round, Oct 20 2026",
          evidence="Every step up earned less: 33%, 30%, 26% vs 35%/yr (all stocks); 41%, 35%, 29% vs 46% (600 biggest). It can hold more, but 7 makes the most money."),
@@ -764,7 +778,8 @@ def live_tick(p=PARAMS, out_dir=None):
         watch = set(book["pos"]) | {o["sym"] for o in book["pending"] if o["side"] == "BUY"}
         st["sell_line"] = {s: round(float(ind["ma"][s].iloc[t]), 4) for s in watch if np.isfinite(ind["ma"][s].iloc[t])}
         st.update(last_scan=today, params_used=dict(p), scan_date=P["C"].index[t], regime=regime, universe_size=len(uni),
-                  passed=len(ranks), spy_close=float(P["C"]["SPY"].iloc[t]), spy_ma=float(ind["spy_ma"].iloc[t]))
+                  passed=len(ranks), spy_close=float(P["C"]["SPY"].iloc[t]), spy_ma=float(ind["spy_ma"].iloc[t]),
+                  spy_vol=float(ind["spy_vol"].iloc[t]))
         rows = []
         for i, s in enumerate(ranks[:40], 1):
             rows.append(dict(rank=i, sym=s, name=names.get(s, {}).get("name", ""), sector=names.get(s, {}).get("sector", ""),
@@ -772,6 +787,19 @@ def live_tick(p=PARAMS, out_dir=None):
                              smooth=round(float(ind["r2"][s].iloc[t]), 2), of_high=round(float(ind["high52"][s].iloc[t]), 3),
                              held=s in book["pos"]))
         st["top"] = rows
+        # the bot's view of every stock it scanned, for the website's search (published once a day)
+        rank_of = {s: i for i, s in enumerate(ranks, 1)}
+        cut = lambda x, k=4: round(float(x), k) if np.isfinite(x) else None
+        allv = []
+        for s in P["C"].columns:
+            if s == "SPY" or not np.isfinite(closes.get(s, np.nan)):
+                continue
+            allv.append([s, names.get(s, {}).get("name", ""), names.get(s, {}).get("sector", ""), cut(closes[s], 2),
+                         rank_of.get(s), cut(P["C"][s].iloc[t] / P["C"][s].iloc[t - p["window"] + 1] - 1),
+                         cut(ind["r2"][s].iloc[t], 2), cut(ind["high52"][s].iloc[t], 3), cut(ind["ma"][s].iloc[t], 2),
+                         None if s in rank_of else why_filtered(P, ind, t, s, p)])
+        st["_universe"] = dict(date=P["C"].index[t], cols=["sym", "name", "sector", "price", "rank", "gain90", "smooth",
+                                                          "of_high", "ma100", "why_not"], rows=allv, passed=len(ranks))
         st["holding_status"] = {s: (why_filtered(P, ind, t, s, p) or f"rank #{ranks.index(s) + 1}" if s in ranks else
                                     why_filtered(P, ind, t, s, p) or "outside the ranking") for s in book["pos"]}
         st["names"] = {s: names.get(s, {}).get("name", "") for s in set(book["pos"]) | {o["sym"] for o in book["pending"]}}
@@ -818,10 +846,14 @@ def live_tick(p=PARAMS, out_dir=None):
     syms = sorted(set(book["pos"]) | {o["sym"] for o in book["pending"]} | {"SPY"})
     live = _live_prices(syms)
     prices = {s: v["price"] for s, v in live.items()}
-    p = dict(p, lev_now=p.get("leverage", 1.0) if st.get("regime") else 1.0)
-    st["risk"] = dict(exposure=p["lev_now"], note=(f"Investing {p['lev_now']:.2f}x the account (borrowing "
-                      f"{p['lev_now'] - 1:.0%} at {p.get('margin_rate', 0.06):.0%} a year) while the market trend is up"
-                      if p["lev_now"] > 1 else "No borrowing: the market trend is down, so no leverage"))
+    p = dict(p, lev_now=lev_for(bool(st.get("regime")), st.get("spy_vol", float("nan")), p))
+    mood = (f"the market is calm (S&P 500 swings {st['spy_vol']:.0%} a year)" if st.get("spy_vol", 1) < 0.15 else
+            f"the market is normal (S&P 500 swings {st['spy_vol']:.0%} a year)" if st.get("spy_vol", 1) < 0.25 else
+            "the market is wild")
+    st["risk"] = dict(exposure=p["lev_now"], spy_vol=st.get("spy_vol"), note=(
+        f"Investing {p['lev_now']:.2f}x the account (borrowing {p['lev_now'] - 1:.0%} at {p.get('margin_rate', 0.06):.0%} "
+        f"a year): the trend is up and {mood}" if p["lev_now"] > 1 else
+        "No borrowing: " + ("the market trend is down" if not st.get("regime") else mood)))
     if st.get("interest_day") != today and now.weekday() < 5 and book["cash"] < 0:
         interest = -book["cash"] * p.get("margin_rate", 0.06) / 252
         book["cash"] -= interest
@@ -918,8 +950,13 @@ def live_tick(p=PARAMS, out_dir=None):
     if (len(book["trades"]), len(st["log"])) != before:  # something worth saving right away (the loop checks this)
         open(os.path.join(HERE, ".changed"), "w").close()
     st["log"] = st["log"][-200:]
+    uni_view = st.pop("_universe", None)
     with open(STATE_FILE, "w") as f:
         json.dump(st, f, default=float)
+    if uni_view and out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, "universe.json"), "w") as f:
+            json.dump(uni_view, f, default=float, separators=(",", ":"))
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
         with open(os.path.join(HERE, "dashboard.html"), "rb") as src, open(os.path.join(out_dir, "index.html"), "wb") as dst:
@@ -993,6 +1030,9 @@ def main():
         os.makedirs(docs, exist_ok=True)
         with open(os.path.join(HERE, "dashboard.html"), "rb") as src, open(os.path.join(docs, "index.html"), "wb") as dst:
             dst.write(src.read())
+        import shutil
+        for icon in ("icon-180.png", "icon-512.png"):   # app icon for phones' home screens
+            shutil.copy(os.path.join(HERE, icon), os.path.join(docs, icon))
         with open(os.path.join(docs, "rules.json"), "w") as f:
             json.dump(dict(rules=RULES, reality=REALITY, params=PARAMS), f)
         with open(os.path.join(docs, "scanner.json"), "w") as f:

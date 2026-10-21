@@ -1,4 +1,4 @@
-# Stock scanner bot (paper money)
+# iyanstockbot (paper money)
 
 Built for Iyan Shivshankar.
 

@@ -36,6 +36,11 @@ PARAMS = dict(
     rebalance_day=2,     # 0=Mon ... 2=Wed (Clenow trades on Wednesdays)
     every_weeks=4,       # full rebalance every 4th week: weekly churned and earned far less in testing
     trail_atr=None,      # optional trailing stop, k x ATR(20) under the highest close
+    trail_pct=0.25,      # safety net: sell if a holding falls 25% under its best close since buying (checked every 30s)
+    weight="score",      # put more money in the strongest trends (score-weighted) instead of equal amounts
+    weight_cap=0.35,     # ...but never more than 35% of the account in one stock
+    band=0.10,           # only resize a holding at a rebalance if it's 10%+ off its target (saves fees)
+    phase=0,             # which week of the cycle it rebalances in
     leverage=1.25,       # while the S&P 500 trend is up, invest 1.25x the account (borrowing 25%); 1.0x when it's down
     margin_rate=0.06,    # yearly interest on borrowed money
     cooldown_days=90,    # after selling on a broken trend, move on: no rebuy for 90 days (free in tests; "forever" cost 2-4%/yr)
@@ -185,7 +190,8 @@ def decide(book, P, ind, t, p=PARAMS, force_rebalance=False):
     ranks = ranking(P, ind, t, p)
     d = datetime.fromisoformat(date)
     is_rebalance = force_rebalance or (d.weekday() == p["rebalance_day"] and
-                                       (p.get("every_weeks", 1) == 1 or d.isocalendar()[1] % p["every_weeks"] == 0))
+                                       (p.get("every_weeks", 1) == 1 or
+                                        d.isocalendar()[1] % p["every_weeks"] == p.get("phase", 0) % p["every_weeks"]))
     if is_rebalance:
         keep = set(ranks[: p["n"] * p["exit_rank"]])
         for s in book["pos"]:
@@ -205,8 +211,37 @@ def decide(book, P, ind, t, p=PARAMS, force_rebalance=False):
                                    reason=f"#{rank} strongest steady uptrend: {gain:+.0%} in {p['window']} trading days, "
                                           f"smoothness {ind['r2'][s].iloc[t]:.2f} out of 1"))
                 slots -= 1
+        if p.get("weight") == "score":
+            selling = {o["sym"] for o in orders if o["side"] == "SELL"}
+            kept = [s for s in ranks if s in book["pos"] and s not in selling]
+            kept += [s for s in book["pos"] if s not in selling and s not in kept]
+            book["pending_w"] = target_weights(ind, t, kept + [o["sym"] for o in orders if o["side"] == "BUY"], p)
+    if not is_rebalance:
+        book["pending_w"] = None
     book["pending"] = orders
     return ranks
+
+
+def target_weights(ind, t, syms, p=PARAMS):
+    """Share of the account for each stock: proportional to its trend score, capped at weight_cap.
+    The weights add up to (stocks held / n), so empty slots stay in cash."""
+    if not syms:
+        return {}
+    sc = ind["score"].iloc[t]
+    raw = np.array([max(float(sc.get(s, np.nan)), 1e-9) if np.isfinite(sc.get(s, np.nan)) else 1e-9 for s in syms])
+    w = raw / raw.sum() * min(len(syms) / p["n"], 1.0)
+    cap = p.get("weight_cap")
+    for _ in range(20):
+        over = w > cap + 1e-12 if cap else np.zeros(len(w), bool)
+        if not over.any():
+            break
+        extra = (w[over] - cap).sum()
+        w[over] = cap
+        under = w < cap
+        if not under.any():
+            break
+        w[under] += extra * w[under] / w[under].sum()
+    return {s: round(float(x), 6) for s, x in zip(syms, w)}
 
 
 def execute(book, prices, date, equity_now, p=PARAMS, atr=None):
@@ -218,6 +253,11 @@ def execute(book, prices, date, equity_now, p=PARAMS, atr=None):
             continue
         _sell(book, o["sym"], px, date, o["reason"], p)
     lev = p.get("lev_now", 1.0)
+    w = book.pop("pending_w", None)
+    if w is not None and p.get("weight") == "score":
+        _execute_weighted(book, prices, date, w, lev, p)
+        book["pending"] = []
+        return
     slot = equity_now * lev / p["n"]
     borrow_room = equity_now * (lev - 1.0)
     for o in [o for o in book["pending"] if o["side"] == "BUY"]:
@@ -230,17 +270,59 @@ def execute(book, prices, date, equity_now, p=PARAMS, atr=None):
         sh = alloc / (px * (1 + FEE))
         book["cash"] -= sh * px * (1 + FEE)
         a = atr.get(o["sym"]) if atr else None
-        stop = px - p["trail_atr"] * a if p["trail_atr"] and a else None
+        stop = px - p["trail_atr"] * a if p["trail_atr"] and a else px * (1 - p["trail_pct"]) if p.get("trail_pct") else None
         book["pos"][o["sym"]] = dict(shares=sh, entry=px, date=date, high=px, stop=stop, last=px, reason=o["reason"])
         book["trades"].append(dict(date=date, side="BUY", sym=o["sym"], price=round(px, 4), shares=round(sh, 4),
                                    reason=o["reason"]))
     book["pending"] = []
 
 
+def _execute_weighted(book, prices, date, w, lev, p):
+    """Rebalance to target weights: trim holdings that grew too big, top up ones that are too small, buy new ones."""
+    ok = lambda s: prices.get(s) is not None and np.isfinite(prices[s])
+    eq = equity_of(book, {s: prices[s] for s in book["pos"] if ok(s)})
+    band, buys = p.get("band", 0.10), {o["sym"]: o for o in book["pending"] if o["side"] == "BUY"}
+    for s, h in book["pos"].items():
+        if s in w and ok(s):
+            tgt, val = w[s] * eq * lev, h["shares"] * prices[s]
+            if val - tgt > band * tgt:
+                sh = (val - tgt) / prices[s]
+                h["shares"] -= sh
+                book["cash"] += sh * prices[s] * (1 - FEE)
+                book["trades"].append(dict(date=date, side="TRIM", sym=s, price=round(prices[s], 4), shares=round(sh, 4),
+                                           reason=f"grew past its target ({w[s]:.0%} of the account): taking some profit"))
+    avg_w = float(np.mean(list(w.values()))) if w else 1.0 / p["n"]
+    for s in list(w) + [x for x in buys if x not in w]:
+        if not ok(s):
+            continue
+        px, h = prices[s], book["pos"].get(s)
+        if h is None and s not in buys:
+            continue
+        tgt = w.get(s, avg_w) * eq * lev
+        val = h["shares"] * px if h else 0.0
+        if h and tgt - val <= band * tgt:
+            continue
+        alloc = min(book["cash"] + (lev - 1.0) * eq, tgt - val)
+        if alloc < (0.1 if h else 0.25) * tgt:
+            continue
+        sh = alloc / (px * (1 + FEE))
+        book["cash"] -= sh * px * (1 + FEE)
+        if h:
+            h["entry"] = (h["entry"] * h["shares"] + px * sh) / (h["shares"] + sh)
+            h["shares"] += sh
+            book["trades"].append(dict(date=date, side="ADD", sym=s, price=round(px, 4), shares=round(sh, 4),
+                                       reason=f"strong trend, below its target ({w.get(s, avg_w):.0%} of the account): adding"))
+        else:
+            book["pos"][s] = dict(shares=sh, entry=px, date=date, high=px, stop=px * (1 - p["trail_pct"]) if p.get("trail_pct") else None,
+                                  last=px, reason=buys[s]["reason"])
+            book["trades"].append(dict(date=date, side="BUY", sym=s, price=round(px, 4), shares=round(sh, 4),
+                                       reason=buys[s]["reason"] + f"; sized at {w.get(s, avg_w):.0%} of the account"))
+
+
 def _sell(book, s, px, date, reason, p=PARAMS):
     h = book["pos"].pop(s)
     cd = p.get("cooldown_days")
-    if cd and "below" in reason:  # the trend broke: move on, don't chase it back
+    if cd and ("below" in reason or "safety net" in reason):  # the trend broke: move on, don't chase it back
         until = "9999-12-31" if cd == "forever" else (datetime.fromisoformat(date) + pd.Timedelta(days=cd)).date().isoformat()
         book.setdefault("banned", {})[s] = until
     book["cash"] += h["shares"] * px * (1 - FEE)
@@ -255,7 +337,9 @@ def check_stops(book, lows, opens, date):
         lo = lows.get(s)
         if h.get("stop") and lo is not None and np.isfinite(lo) and lo <= h["stop"]:
             op = opens.get(s, h["stop"])
-            _sell(book, s, min(op, h["stop"]) if np.isfinite(op) else h["stop"], date, "trailing stop hit")
+            drop = 1 - h["stop"] / h["high"] if h.get("high") else 0
+            _sell(book, s, min(op, h["stop"]) if np.isfinite(op) else h["stop"], date,
+                  f"safety net: fell {drop:.0%} under its best close since buying")
 
 
 def mark(book, closes, atr, p=PARAMS):
@@ -267,6 +351,8 @@ def mark(book, closes, atr, p=PARAMS):
             a = atr.get(s)
             if p["trail_atr"] and a and np.isfinite(a):
                 h["stop"] = max(h["stop"] or 0, h["high"] - p["trail_atr"] * a)
+            elif p.get("trail_pct"):
+                h["stop"] = max(h.get("stop") or 0, h["high"] * (1 - p["trail_pct"]))
 
 
 # ---------------------------------------------------------------- backtest
@@ -283,7 +369,7 @@ def backtest(P, ind, p=PARAMS, start=260):
         row = lambda k: P[k].iloc[t].to_dict()
         opens, lows, closes = row("O"), row("L"), row("C")
         eq_prev = curve[-1][1] if curve else book["cash"]
-        if book["pending"]:
+        if book["pending"] or book.get("pending_w"):
             execute(book, opens, dates[t], eq_prev, p, ind["atr"].iloc[t - 1].to_dict())
         check_stops(book, lows, opens, dates[t])
         mark(book, closes, ind["atr"].iloc[t].to_dict(), p)
@@ -357,7 +443,7 @@ def run_window(P, ind, t0, days, names, p=PARAMS, pred=None):
         opens, lows, closes = row("O"), row("L"), row("C")
         eq_prev = frames[-1]["eq"] if frames else bot.START_CASH
         n_before = len(book["trades"])
-        if book["pending"]:
+        if book["pending"] or book.get("pending_w"):
             execute(book, opens, dates[t], eq_prev, p, ind["atr"].iloc[t - 1].to_dict())
         check_stops(book, lows, opens, dates[t])
         mark(book, closes, ind["atr"].iloc[t].to_dict(), p)
@@ -388,7 +474,7 @@ def sim_summary(P, ind, ts, days, p=PARAMS):
         eq = bot.START_CASH
         for t in range(t0 + 1, t0 + days + 1):
             row = lambda k: P[k].iloc[t].to_dict()
-            if book["pending"]:
+            if book["pending"] or book.get("pending_w"):
                 execute(book, row("O"), P["C"].index[t], eq, p)
             check_stops(book, row("L"), row("O"), P["C"].index[t])
             mark(book, row("C"), ind["atr"].iloc[t].to_dict(), p)
@@ -493,7 +579,8 @@ def journal(book):
     quick = [t for t in losses if days(t) <= 10]
     by_reason = {}
     for t in sells:
-        k = "trend broke" if "below" in t["reason"] else "rebalanced out" if "fell out" in t["reason"] else t["reason"]
+        k = ("safety net" if "safety net" in t["reason"] else "trend broke" if "below" in t["reason"]
+             else "rebalanced out" if "fell out" in t["reason"] else t["reason"])
         by_reason.setdefault(k, []).append(t["ret"])
     lessons = []
     if wins and losses:
@@ -524,25 +611,32 @@ RULES = [
     dict(kept=True, rule="Only buy while the S&P 500 is above its 200-day average; otherwise wait in cash.",
          source="Faber's 10-month rule; O'Neil's 'M' in CAN SLIM; Daniel & Moskowitz on momentum crashes",
          evidence="Without it the worst year in the 9-year test went from -9% to -30%."),
-    dict(kept=True, rule="Hold the strongest few in equal amounts and rebalance every few weeks (started at 7 stocks, every 4 weeks).",
-         source="Tested here", evidence="7 beat 10 in both tests (36% and 41% a year). Weekly rebalancing earned far less (12%)."),
-    dict(kept=True, rule="Learn every month: replay the past 12 months with 27 setting combos and switch to the one that made the most.",
-         source="Walk-forward testing (each choice uses only data before it)",
-         evidence="9 years: 50.5%/yr vs 41.3% with fixed settings. 4 years, all stocks: 33.9% vs 32.8%. Learning from 6 or 24 months was unreliable."),
+    dict(kept=True, rule="Hold the 7 strongest and rebalance every 4 weeks. More holdings earned less: 10, 15 and 20 stocks made 15%, 16% and 13% a year vs 22% for 7 (all stocks), and 23%, 16% and 14% vs 33% (600 biggest).",
+         source="Tested here, averaged over 20 rebalance timings", evidence="Weekly rebalancing earned far less (12%). 'As many as it needs' (holding every stock above a score bar) also earned less than 7."),
+    dict(kept=True, rule="Bet more on the strongest: each stock's share of the account follows its trend score (capped at 35% in one stock), resized at every rebalance.",
+         source="Tested here, averaged over 20 rebalance timings", evidence="Beat equal amounts in 85% of timings (all stocks: 21.7% to 25.8%/yr) and 100% (600 biggest: 33.4% to 36.9%). Still ahead with 3x the trading costs."),
+    dict(kept=True, rule="Safety net, checked every 30 seconds: sell a holding the moment it falls 25% under its best close since buying, then don't rebuy it for 90 days.",
+         source="Tested here, averaged over 20 rebalance timings", evidence="With score weights: 25.8% to 29.8%/yr and worst drop -51% to -41% (all stocks); 36.9% to 39.2%/yr (600 biggest). It triggers only a few times a year."),
+    dict(kept=False, rule="Monthly learning that switches to whatever settings won over the last 12 months.",
+         source="Walk-forward test over 4 rebalance timings", evidence="30-31%/yr vs 49% for the fixed rules (all stocks) and 37-39% vs 39% (600 biggest). Its earlier win was luck of one timing. It now runs as a monthly report only."),
     dict(kept=True, rule="While the S&P 500 trend is up, invest 1.25x the account (borrowing 25% at 6% a year); no borrowing when it's down.",
          source="Tested here (smart-risk experiment)",
          evidence="7-stock rules: 32.7% to 40.7%/yr (all stocks) and 41.3% to 51.1%/yr (600 biggest); worst drop -30% to -36% and -26% to -32%. 1.5x earned more but drops reached -44% to -58%."),
     dict(kept=True, rule="Read company news and SEC filings for every holding and the next candidates: serious red flags (bankruptcy, delisting, restatement, going concern, fraud action, FDA rejection) block buys and sell holdings; warnings (offerings, guidance cuts, short reports) block buys and sell only if the price falls 5%+ vs the market.",
          source="Chan 2003; Tetlock et al. 2008; Loughran & McDonald 2011; event studies on offerings, restatements, bankruptcy",
          evidence="Bad news drifts for weeks; good news is priced in within hours, so good news only breaks ties. Not backtested here (no free headline history); a protective rule."),
-    dict(kept=True, rule="Rescan all ~2,100 stocks with live prices every minute: live leaderboard, today's movers, and sell-line warnings.",
+    dict(kept=True, rule="Rescan all ~2,100 stocks (including 440+ foreign companies listed in the US) with live prices every 30 seconds: live leaderboard, today's movers, sell-line and safety-net warnings.",
          source="Your request", evidence="Re-ranking or swapping buys at the open did not beat the tested daily rules (24-26% vs 24%/yr; 35-41% vs 38%), so the rescan watches and reports but the daily rules decide."),
-    dict(kept=True, rule="Check every minute during market hours using 1-minute prices.",
-         source="Your request", evidence="Faster fills at the open; trades still follow the tested daily rules."),
+    dict(kept=True, rule="Check every holding every 30 seconds during market hours using live prices.",
+         source="Your request", evidence="Fast fills at the open and the safety net acts within 30 seconds; buys and rebalances still follow the tested daily rules."),
     dict(kept=True, rule="Sell the morning after a holding closes below its 100-day average, then move on: no rebuying it for 90 days.",
          source="Clenow's exit; tested here", evidence="The 90-day ban cost nothing; banning forever cost 2-4% a year."),
-    dict(kept=False, rule="Trailing stops (sell on intraday dips).", source="Common trading advice",
-         evidence="Cut returns sharply in both tests (as low as 3% a year): strong stocks dip and recover."),
+    dict(kept=False, rule="Tight stops: sell on a 10-20% dip from the high, a 5-12% drop in one day, or an 8-15% loss from the buy price.", source="Common trading advice",
+         evidence="Every version earned less, most of them far less (3-18% a year vs 22% on all stocks): strong stocks dip and recover, and the bot ends up selling low."),
+    dict(kept=False, rule="Refill a freed slot right away with the next-best stock instead of waiting for the rebalance.", source="Tested here",
+         evidence="About the same return with a deeper worst drop (-39% vs -35%)."),
+    dict(kept=False, rule="Portfolio stop: sell everything after the account falls 15-20% from its peak.", source="Tested here",
+         evidence="15%: 24% to 15%/yr; 20%: 24% to 23%/yr. It sold near bottoms and missed the rebounds."),
     dict(kept=False, rule="Rank by nearness to the 52-week high alone.", source="George & Hwang",
          evidence="About 0% a year as a stand-alone ranking."),
     dict(kept=False, rule="Loosen the jump filter to 25%.", source="Tested here",
@@ -630,22 +724,22 @@ def live_tick(p=PARAMS, out_dir=None):
     before = (len(book["trades"]), len(st["log"]))
     note = lambda msg: st["log"].append([int(time.time()), msg])
 
-    # learning: once a month (outside market hours) re-test 27 setting combos on the past year, adopt the best
+    # monthly review (outside market hours): replay the past year with 27 setting combos and report what would have won.
+    # It does NOT switch settings: in walk-forward tests, chasing last year's winner earned 30-39%/yr vs 39-49% for
+    # the fixed rules (averaged over 4 rebalance timings), so the bot adapts through its rules instead.
     learned = st.get("learned")
-    if (not learned or time.time() - learned["at"] > LEARN_EVERY * 86400) and not _market_open(now):
+    if (not learned or time.time() - learned["at"] > LEARN_EVERY * 86400 or learned.get("v") != 2) and now.hour >= 16:
         try:
-            old = learned["best"] if learned else dict(n=p["n"], window=p["window"], every_weeks=p["every_weeks"])
-            learned = st["learned"] = learn(base=p)
+            learned = st["learned"] = dict(learn(base=p), v=2)
             b = learned["best"]
-            same = (b["n"], b["window"], b["every_weeks"]) == (old["n"], old["window"], old["every_weeks"])
-            note(f"Learned from the last 12 months ({learned['since']} to {learned['until']}): best was holding {b['n']} "
-                 f"stocks, {b['window']}-day trends, rebalancing every {b['every_weeks']} weeks ({b['ret']:+.1f}% "
-                 f"over the year). " + ("Keeping the same settings." if same else "Switching to those settings."))
+            mine = next((r for r in learned["table"] if (r["n"], r["window"], r["every_weeks"]) ==
+                         (p["n"], p["window"], p["every_weeks"])), None)
+            note(f"Monthly review of the last 12 months ({learned['since']} to {learned['until']}): the best combo was "
+                 f"{b['n']} stocks, {b['window']}-day trends, every {b['every_weeks']} weeks ({b['ret']:+.1f}%); the current "
+                 f"rules made {mine['ret']:+.1f}%. Keeping the current rules: switching to last year's winner lost in testing."
+                 if mine else "Monthly review done.")
         except Exception as e:
-            note(f"Learning step failed ({type(e).__name__}); keeping the current settings.")
-    if st.get("learned"):
-        b = st["learned"]["best"]
-        p = dict(p, n=b["n"], window=b["window"], every_weeks=b["every_weeks"])
+            note(f"Monthly review failed ({type(e).__name__}); rules unchanged.")
 
     if st.get("last_scan") != today or st.get("params_used") != p:  # new day, or the rules changed
         if st.get("last_scan") == today:
@@ -761,7 +855,7 @@ def live_tick(p=PARAMS, out_dir=None):
                                 losers=[dict(sym=k, change=round(c, 4)) for c, k in movers[-5:][::-1]])
         except Exception as e:
             note(f"Live rescan failed ({type(e).__name__}); using the morning scan.")
-        if book["pending"]:
+        if book["pending"] or book.get("pending_w"):
             done = len(book["trades"])
             execute(book, prices, today, equity_of(book, prices), p, st.get("atr"))
             for x in book["trades"][done:]:
@@ -779,7 +873,7 @@ def live_tick(p=PARAMS, out_dir=None):
             h["last"] = prices[s]
     eq = equity_of(book, prices)
 
-    # the 5-minute check: where every holding stands against its sell line, and what the bot will do
+    # the 30-second check: where every holding stands against its sell line and safety net, and what the bot will do
     rows, warn = [], []
     for s, h in book["pos"].items():
         line = st.get("sell_line", {}).get(s)
@@ -787,7 +881,9 @@ def live_tick(p=PARAMS, out_dir=None):
         room = px / line - 1 if line else None
         if room is not None and room < 0:
             warn.append(s)
-        rows.append(dict(sym=s, price=round(px, 2), line=line, room=round(room, 4) if room is not None else None))
+        rows.append(dict(sym=s, price=round(px, 2), line=line, room=round(room, 4) if room is not None else None,
+                         stop=round(h["stop"], 2) if h.get("stop") else None,
+                         stop_room=round(px / h["stop"] - 1, 4) if h.get("stop") else None))
     if not _market_open(now):
         verdict = ("Market closed. " + (f"{len(book['pending'])} orders ready for the next open."
                                          if book["pending"] else "Nothing planned for the open."))
@@ -798,7 +894,8 @@ def live_tick(p=PARAMS, out_dir=None):
         verdict = (f"{', '.join(warn)} below the sell line right now. If still below at the 4pm close, "
                    f"it's sold at tomorrow's open. Everything else: hold.")
     else:
-        verdict = f"All {len(book['pos'])} holdings above their sell lines. Decision: hold."
+        verdict = (f"All {len(book['pos'])} holdings above their sell lines and safety nets. Decision: hold. "
+                   "A holding is sold instantly if it falls 25% under its best close since buying.")
     st["check"] = dict(t=int(time.time()), verdict=verdict, rows=rows)
     if live.get("SPY") and now.weekday() < 5 and now.hour >= 9:
         book["equity"].append([int(time.time()), round(eq, 2), round(live["SPY"]["price"], 2)])

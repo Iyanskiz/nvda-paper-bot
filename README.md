@@ -5,7 +5,7 @@ uptrends, waits in cash when the market is falling, and sells a stock once its t
 
 Dashboard: https://nvda-paper-bot.vercel.app (mirror: https://iyanskiz.github.io/nvda-paper-bot/)
 
-- **Live portfolio:** the real-time paper account, checked every 5 minutes during market hours, vs the same $10k in the S&P 500.
+- **Live portfolio:** the real-time paper account, checked every 30 seconds during market hours, vs the same $10k in the S&P 500.
 - **Simulator:** replays real past bull, choppy and bear markets (1, 3 or 6 months) day by day. The bot only sees data up to each day.
 - **Backtest:** the same rules on 4 years of ~2,100 stocks and 9 years of the 600 biggest, plus the track record of its predictions.
 - **How it works:** every rule, where it came from, and what testing showed.
@@ -15,17 +15,29 @@ Dashboard: https://nvda-paper-bot.vercel.app (mirror: https://iyanskiz.github.io
 1. Each weekday morning pull all ~7,000 NYSE/Nasdaq/AMEX stocks from Nasdaq; keep ~2,100 real companies ($2B+ market cap, $5+ price).
 2. Rank by how fast and how steadily each climbed over 90 trading days (Clenow: regression slope x R^2).
 3. Filters: above the 100-day average, within 25% of the 52-week high, no 15%+ one-day jumps, enough volume.
-4. Buy the top few (5-10, chosen by its monthly learning) in equal amounts, only while the S&P 500 is above its 200-day average.
+4. Buy the top 7, sized by trend strength (score-weighted, max 35% in one stock), only while the S&P 500 is above its 200-day average.
 5. Sell the morning after a holding closes below its 100-day average, and don't buy it back for 90 days. Full rebalance every few weeks.
-6. Decide after the close, trade at the next open, 0.05% cost per trade. Checks every minute during market hours.
+6. Decide after the close, trade at the next open, 0.05% cost per trade. Checks every 30 seconds during market hours.
+   **Safety net:** sell right away if a holding falls 25% under its best close since buying (then a 90-day ban).
 7. **Smart leverage:** 1.25x the account while the S&P 500 trend is up (6%/yr interest on the borrowed 25%), 1.0x otherwise.
    Backtest: 40.7%/yr (all stocks) and 51.1%/yr (600 biggest) vs 32.7% / 41.3% without, worst drop -36% / -32%.
 8. **News:** `news.py` reads Yahoo/Nasdaq/Google headlines and SEC EDGAR filings for holdings and the next candidates.
    Serious red flags block buys and sell holdings; warnings block buys and sell only if the price confirms.
-9. **Live rescan:** all ~2,100 stocks re-priced every minute (Yahoo spark, ~4 s); it reports, the tested daily rules decide.
-10. **Learns monthly:** replays the past 12 months with 27 setting combos (5/7/10 stocks, 60/90/120-day trends,
-   rebalance every 3/4/6 weeks) and switches to the best. Walk-forward tested: 50.5%/yr vs 41.3% fixed (9 years),
-   33.9% vs 32.8% (4 years); learning from 6 or 24 months was unreliable. It also keeps a journal of its own trades.
+9. **Live rescan:** all ~2,100 stocks (440+ of them foreign companies listed in the US) re-priced every 30 seconds
+   (Yahoo spark, ~4 s); it reports, the tested daily rules decide.
+10. **Monthly review (report only):** replays the past 12 months with 27 setting combos. It used to switch to the
+   winner, but averaged over 4 rebalance timings that earned 30-31%/yr vs 49% for fixed rules (all stocks) and 37-39% vs
+   39% (600 biggest), so it now only reports. It also keeps a journal of its own trades.
+
+### Tested and rejected (mean over 20 rebalance timings, no leverage)
+
+| Idea | All stocks, 4y | 600 biggest, 9y |
+|---|---|---|
+| Current rules (7 stocks, score-weighted, 25% safety net) | 29.8%/yr | 39.2%/yr |
+| Same with equal amounts, no safety net | 21.7% | 33.4% |
+| Tight stops: 10% / 15% / 20% under the high | 3.1% / 8.5% / 18.1% | 17.7% / 22.1% / 28.4% |
+| Sell on a 5% / 8% one-day drop | 3.4% / 13.7% | 12.3% / 25.9% |
+| Hold 15 / 20 stocks | 15.5% / 13.4% | 16.1% / 13.7% |
 
 ## Penny-stock bot (standby, not running)
 
@@ -60,9 +72,10 @@ python serve_docs.py                # preview the dashboard at http://[::1]:8800
 
 ## Cloud
 
-`.github/workflows/bot.yml` runs `python scanner.py --tick` every 5 minutes on weekdays during market hours, saves
-`scanner_state.json` to `main`, and pushes the live numbers to the `data` branch (the dashboard reads them from
-raw.githubusercontent.com). The page is republished only when its code changes or once a day with fresh
+`.github/workflows/trader.yml` runs `.github/scripts/trade_loop.sh`: one job at a time runs `python scanner.py --tick`
+every 30 seconds during market hours, idles otherwise, and starts its own next run before GitHub's 6-hour cap (the
+cron schedule is only a backup, since GitHub delays and skips scheduled runs). It saves `scanner_state.json` to `main`
+and force-pushes the live numbers to the `data` branch (the dashboard reads them through the GitHub API). The page is republished only when its code changes or once a day with fresh
 Backtest/Simulator data. `vercel/vercel.json` is a Vercel mirror that proxies the GitHub Pages site.
 
 `bot.py` holds the shared data helpers (Yahoo prices, indicators, times) and the retired NVDA bot code.

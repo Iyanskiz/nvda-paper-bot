@@ -1,5 +1,7 @@
 # Stock scanner bot (paper money)
 
+Built for Iyan Shivshankar.
+
 A bot that scans the whole US stock market every day, invests $10,000 of **paper money** in the strongest steady
 uptrends, waits in cash when the market is falling, and sells a stock once its trend breaks. No real money, no broker.
 
@@ -14,7 +16,7 @@ Dashboard: https://nvda-paper-bot.vercel.app (mirror: https://iyanskiz.github.io
 
 1. Each weekday morning pull all ~7,000 NYSE/Nasdaq/AMEX stocks from Nasdaq; keep ~2,100 real companies ($2B+ market cap, $5+ price).
 2. Rank by how fast and how steadily each climbed over 90 trading days (Clenow: regression slope x R^2).
-3. Filters: above the 100-day average, within 25% of the 52-week high, no 15%+ one-day jumps, enough volume.
+3. Filters: above the 100-day average, within 25% of the 52-week high, no 20%+ one-day jumps, $50M+ traded a day.
 4. Buy the top 7, sized by trend strength (score-weighted, max 35% in one stock), only while the S&P 500 is above its 200-day average.
 5. Sell the morning after a holding closes below its 100-day average, and don't buy it back for 90 days. Full rebalance every few weeks.
 6. Decide after the close, trade at the next open, 0.05% cost per trade. Checks every 30 seconds during market hours.
@@ -38,6 +40,13 @@ Dashboard: https://nvda-paper-bot.vercel.app (mirror: https://iyanskiz.github.io
 | Tight stops: 10% / 15% / 20% under the high | 3.1% / 8.5% / 18.1% | 17.7% / 22.1% / 28.4% |
 | Sell on a 5% / 8% one-day drop | 3.4% / 13.7% | 12.3% / 25.9% |
 | Hold 15 / 20 stocks | 15.5% / 13.4% | 16.1% / 13.7% |
+
+## Brokerage link (optional, `broker.py`)
+
+Copies the bot's portfolio into an Alpaca account in the same proportions on every check. Add repository secrets
+`ALPACA_KEY_ID` and `ALPACA_SECRET_KEY` (Alpaca paper keys to start). Variables: `ALPACA_MODE=live` for real money
+(account holder 18+), `ALPACA_MAX_EXPOSURE` (default 1.0, no borrowing). Money moves bank -> Alpaca inside Alpaca's app;
+the bot never handles bank details.
 
 ## Penny-stock bot (standby, not running)
 

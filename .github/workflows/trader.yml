@@ -27,6 +27,11 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TEST_MINUTES: ${{ inputs.test_minutes }}
+      # optional brokerage link (see broker.py); empty unless you add these in the repo settings
+      ALPACA_KEY_ID: ${{ secrets.ALPACA_KEY_ID }}
+      ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+      ALPACA_MODE: ${{ vars.ALPACA_MODE }}
+      ALPACA_MAX_EXPOSURE: ${{ vars.ALPACA_MAX_EXPOSURE }}
     steps:
       - uses: actions/checkout@v4
 

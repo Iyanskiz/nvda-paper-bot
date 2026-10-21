@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#090b0f">
-<title>Stock Scanner Bot</title>
+<title>Stock Scanner Bot · Iyan Shivshankar</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap">
@@ -40,6 +40,8 @@
   .top { border-bottom: 1px solid var(--line); background: var(--bg); }
   .top-in { max-width: 1180px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; min-height: 60px; }
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 16px; letter-spacing: -.01em; }
+  .brand-t { display: flex; flex-direction: column; line-height: 1.15; }
+  .brand-t .owner { font-size: 11.5px; font-weight: 550; color: var(--muted); letter-spacing: .01em; }
   .mark { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: #06101f;
           background: linear-gradient(135deg, #6c9bff, #2fd47c); }
   .paper { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--warn); background: var(--warn-bg);
@@ -101,6 +103,7 @@
   .hero-top { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; margin-bottom: 4px; }
   .eyebrow { font-size: 13px; font-weight: 550; color: var(--text-2); }
   .status { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); }
+  .status > span { white-space: nowrap; }
   .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
   .status.live .dot { background: var(--up); animation: pulse 2s infinite; }
   .status.err { color: var(--down); } .status.err .dot { background: var(--down); }
@@ -367,7 +370,7 @@
   <div class="top-in">
     <div class="brand">
       <span class="mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg></span>
-      <span>Stock Scanner Bot</span>
+      <span class="brand-t"><span>Stock Scanner Bot</span><span class="owner">Iyan Shivshankar</span></span>
     </div>
     <span class="paper" title="No real money is used">PAPER MONEY ONLY</span>
     <nav class="tabs" aria-label="Sections">
@@ -386,7 +389,7 @@
       <div class="col">
         <section class="hero o1" aria-label="Account summary">
           <div class="hero-top">
-            <span class="eyebrow">Account value</span>
+            <span class="eyebrow">Iyan's account value</span>
             <span class="status" id="status-wrap"><i class="dot" aria-hidden="true"></i><span id="status">loading...</span></span>
           </div>
           <div class="hero-value skel" id="lv-eq">&nbsp;</div>
@@ -479,6 +482,11 @@
           <div class="card-h"><h2>News check</h2><span class="sub">tap a stock for headlines</span></div>
           <div class="ncount" id="lv-news-count"></div>
           <div class="list" id="lv-news"></div>
+        </div>
+
+        <div class="card o10" id="lv-broker-card">
+          <div class="card-h"><h2>Brokerage link</h2><span class="sub" id="lv-broker-sub">not connected</span></div>
+          <div id="lv-broker" class="learn-text">Not connected. The bot trades paper money only. See How it works to link an Alpaca account.</div>
         </div>
 
         <div class="card o10">
@@ -627,6 +635,21 @@
             replays the past year with 27 other settings as a report. It doesn't switch to last year's winner, because that lost money in testing.</div></li>
         </ol>
       </div>
+      <div class="card">
+        <div class="card-h"><h2>Connecting a real account (optional)</h2></div>
+        <ol class="steps">
+          <li><div><b>How money gets in:</b> a bank can't plug into a bot directly. You open a brokerage account at
+            <b>Alpaca</b> (alpaca.markets, built for trading bots, no commissions) and move money from your bank into it inside Alpaca's app.
+            The bot never sees bank details.</div></li>
+          <li><div><b>Start with Alpaca's paper account:</b> it's free and gives fake money. In Alpaca, open Paper Trading, create API keys,
+            then in GitHub go to the repo's Settings, Secrets and variables, Actions, and add two secrets:
+            <b>ALPACA_KEY_ID</b> and <b>ALPACA_SECRET_KEY</b>. From the next check, the bot copies this portfolio into that account
+            in the same proportions, and the Brokerage link card shows it.</div></li>
+          <li><div><b>Real money, later:</b> needs an account holder who is 18 or older. Use the live keys and add a repository variable
+            <b>ALPACA_MODE</b> = <b>live</b>. The copy never borrows unless you set <b>ALPACA_MAX_EXPOSURE</b> above 1.
+            Run it on paper for a few weeks first, and only put in money you can afford to lose: past tests are not a promise.</div></li>
+        </ol>
+      </div>
       <p class="callout" id="reality-wrap"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span id="reality">Loading the reality check...</span></p>
       <div class="card">
         <div class="card-h"><h2>What the bot knows: research and what survived testing</h2></div>
@@ -635,7 +658,7 @@
     </div>
   </section>
 
-  <p class="foot">Paper money only: no real money is invested, and nothing here is investment advice. All times are Pacific (PT).</p>
+  <p class="foot">Iyan Shivshankar's trading bot. Paper money only: no real money is invested, and nothing here is investment advice. All times are Pacific (PT).</p>
 </main>
 
 <script>
@@ -889,6 +912,16 @@ function renderLive(s) {
   });
   part("rescan", () => renderRescan(s));
   part("news", () => renderNews(s));
+  part("broker", () => {
+    const B = s.broker || {};
+    $("lv-broker-sub").textContent = B.connected ? (B.mode === "live" ? "LIVE: real money" : "Alpaca paper account") : "not connected";
+    if (!B.connected) return;
+    const ord = (B.orders || []).map(o => `${esc(o.side)} ${esc(o.symbol)}${o.error ? " (failed)" : ""}`).join(", ");
+    $("lv-broker").innerHTML = `Copying this portfolio into the Alpaca ${B.mode === "live" ? "<b>live, real-money</b>" : "paper"} account` +
+      (fin(B.equity) ? `: account value <b>${money(B.equity)}</b>, cash ${money(B.cash)}.` : ".") +
+      (B.t ? ` Last sync ${ptStamp(B.t)}.` : "") + (ord ? ` Orders: ${ord}.` : "") +
+      (B.note ? ` ${esc(B.note)}` : "") + (B.error ? ` <span class="down">Problem: ${esc(B.error)}</span>` : "");
+  });
   part("top", () => renderTop(s));
   part("days", () => {
     const days = Object.entries(s.days || {}).filter(([, v]) => Array.isArray(v)).sort((x, y) => x[0] < y[0] ? 1 : -1);

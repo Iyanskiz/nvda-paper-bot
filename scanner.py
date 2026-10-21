@@ -28,9 +28,9 @@ PARAMS = dict(
     n=7,                 # how many stocks to hold: 7 beat 10 in both backtests (5 earned more but swung harder)
     window=90,           # days in the trend regression
     ma=100,              # must close above this moving average to buy or keep
-    max_gap=0.15,        # skip stocks that moved more than 15% in one day lately (news jumps, not trends)
+    max_gap=0.20,        # skip stocks that moved more than 20% in one day lately (news jumps, not trends)
     near_high=0.75,      # must be within 25% of the 52-week high
-    min_dollar_vol=20e6, # average daily dollar volume, so trades would really fill
+    min_dollar_vol=50e6, # $50M+ traded a day: real, liquid trends (beat $20M in testing on both datasets)
     regime_ma=200,       # new buys only while SPY is above its 200-day average
     exit_rank=2,         # sell if it falls out of the top n * exit_rank at a rebalance
     rebalance_day=2,     # 0=Mon ... 2=Wed (Clenow trades on Wednesdays)
@@ -606,8 +606,9 @@ RULES = [
          evidence="Its top picks gained +2.8% to +3.4% a month on average vs +1.6% to +1.8% for an average stock."),
     dict(kept=True, rule="Only buy stocks above their 100-day average, within 25% of their 52-week high, with enough trading.",
          source="Clenow; George & Hwang (52-week high)", evidence="Keeps it to stocks already in healthy uptrends."),
-    dict(kept=True, rule="Skip stocks that jumped 15%+ in a single day lately (news spikes, not trends).",
-         source="Clenow", evidence="Removing it raised returns in one test but deepened the worst drop to -41%."),
+    dict(kept=True, rule="Only stocks trading $50M+ a day, and skip any that jumped 20%+ in a single day lately (news spikes, not trends).",
+         source="Clenow (jump filter); training round, Oct 20 2026",
+         evidence="Mean over 20 rebalance timings, with leverage: all stocks 35% to 70%/yr (ahead in 95% of timings, both halves of the test, smaller worst drop); 600 biggest 46% to 51%/yr (ahead in 80%). The middle setting was chosen, not the luckiest one."),
     dict(kept=True, rule="Only buy while the S&P 500 is above its 200-day average; otherwise wait in cash.",
          source="Faber's 10-month rule; O'Neil's 'M' in CAN SLIM; Daniel & Moskowitz on momentum crashes",
          evidence="Without it the worst year in the 9-year test went from -9% to -30%."),
@@ -639,8 +640,10 @@ RULES = [
          evidence="15%: 24% to 15%/yr; 20%: 24% to 23%/yr. It sold near bottoms and missed the rebounds."),
     dict(kept=False, rule="Rank by nearness to the 52-week high alone.", source="George & Hwang",
          evidence="About 0% a year as a stand-alone ranking."),
-    dict(kept=False, rule="Loosen the jump filter to 25%.", source="Tested here",
-         evidence="+84% a year in one test but driven by a few lucky stocks; not reliable."),
+    dict(kept=False, rule="Borrow more: 1.5x or 1.75x instead of 1.25x.", source="Training round, Oct 20 2026",
+         evidence="More profit (all stocks 35% to 39-42%/yr) but the average worst drop went from -42% to -48% and -54%. Too much risk."),
+    dict(kept=False, rule="Hold many more stocks (10, 15, 25).", source="Training round, Oct 20 2026",
+         evidence="Every step up earned less: 33%, 30%, 26% vs 35%/yr (all stocks); 41%, 35%, 29% vs 46% (600 biggest). It can hold more, but 7 makes the most money."),
 ]
 REALITY = ("Paper money only. The tests use today's list of stocks, which leaves out companies that collapsed, so real "
            "results would be lower. The bot's top picks rose about as often as an average stock (54-57% of months); "
@@ -872,6 +875,13 @@ def live_tick(p=PARAMS, out_dir=None):
         if s in prices:
             h["last"] = prices[s]
     eq = equity_of(book, prices)
+
+    # optional brokerage copy (Alpaca): only when keys are set as GitHub secrets; never blocks the bot
+    import broker
+    if broker.configured() and (_market_open(now) or st.get("broker", {}).get("t", 0) < time.time() - 1800):
+        st["broker"] = broker.sync(book, prices, note)
+    elif not broker.configured():
+        st["broker"] = dict(connected=False)
 
     # the 30-second check: where every holding stands against its sell line and safety net, and what the bot will do
     rows, warn = [], []

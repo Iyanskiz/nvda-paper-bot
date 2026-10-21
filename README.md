@@ -5,7 +5,7 @@ Built for Iyan Shivshankar.
 A bot that scans the whole US stock market every day, invests $10,000 of **paper money** in the strongest steady
 uptrends, waits in cash when the market is falling, and sells a stock once its trend breaks. No real money, no broker.
 
-Dashboard: https://nvda-paper-bot.vercel.app (mirror: https://iyanskiz.github.io/nvda-paper-bot/)
+Dashboard: https://iyanstockbot.vercel.app (also https://nvda-paper-bot.vercel.app; mirror: https://iyanskiz.github.io/nvda-paper-bot/)
 
 - **Live portfolio:** the real-time paper account, checked every 30 seconds during market hours, vs the same $10k in the S&P 500.
 - **Simulator:** replays real past bull, choppy and bear markets (1, 3 or 6 months) day by day. The bot only sees data up to each day.

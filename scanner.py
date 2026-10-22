@@ -656,8 +656,12 @@ RULES = [
          evidence="About 0% a year as a stand-alone ranking."),
     dict(kept=False, rule="Borrow 1.5x or 1.75x all the time, whatever the market mood.", source="Training round, Oct 20 2026",
          evidence="More profit (all stocks 35% to 39-42%/yr) but the average worst drop went from -42% to -48% and -54%. Too much risk."),
-    dict(kept=False, rule="Hold many more stocks (10, 15, 25).", source="Training round, Oct 20 2026",
-         evidence="Every step up earned less: 33%, 30%, 26% vs 35%/yr (all stocks); 41%, 35%, 29% vs 46% (600 biggest). It can hold more, but 7 makes the most money."),
+    dict(kept=False, rule="Hold many more stocks (10, 15, 20, 30), also with extra weight on the strongest.", source="Training rounds, Oct 20-21 2026",
+         evidence="Every step up earned less with today's rules: 72%, 65%, 58%, 48% vs 81%/yr (all stocks); 52%, 46%, 41%, 35% vs 58% (600 biggest). Losses shrink a little too, but 7 makes the most money."),
+    dict(kept=False, rule="Brake: stop borrowing after the account falls 10-20% from its peak.", source="Training round, Oct 21 2026",
+         evidence="Cut the average worst drop from -44% to -37/-40% but gave up 16-18 points a year (all stocks) and 7-10 (600 biggest)."),
+    dict(kept=False, rule="Sell everything the day the S&P 500 drops below its 200-day average.", source="Training round, Oct 21 2026",
+         evidence="Earned less (78% vs 81%/yr, 52% vs 58%) with the same or deeper drops: it sold into dips that recovered."),
 ]
 REALITY = ("Paper money only. The tests use today's list of stocks, which leaves out companies that collapsed, so real "
            "results would be lower. The bot's top picks rose about as often as an average stock (54-57% of months); "
@@ -739,7 +743,7 @@ def live_tick(p=PARAMS, out_dir=None):
     st = json.load(open(STATE_FILE)) if os.path.exists(STATE_FILE) else dict(book=new_book(), days={}, log=[])
     book = st["book"]
     before = (len(book["trades"]), len(st["log"]))
-    note = lambda msg: st["log"].append([int(time.time()), msg])
+    note = lambda msg, kind="info": st["log"].append([int(time.time()), msg, kind])
 
     # monthly review (outside market hours): replay the past year with 27 setting combos and report what would have won.
     # It does NOT switch settings: in walk-forward tests, chasing last year's winner earned 30-39%/yr vs 39-49% for
@@ -754,13 +758,13 @@ def live_tick(p=PARAMS, out_dir=None):
             note(f"Monthly review of the last 12 months ({learned['since']} to {learned['until']}): the best combo was "
                  f"{b['n']} stocks, {b['window']}-day trends, every {b['every_weeks']} weeks ({b['ret']:+.1f}%); the current "
                  f"rules made {mine['ret']:+.1f}%. Keeping the current rules: switching to last year's winner lost in testing."
-                 if mine else "Monthly review done.")
+                 if mine else "Monthly review done.", "learn")
         except Exception as e:
             note(f"Monthly review failed ({type(e).__name__}); rules unchanged.")
 
     if st.get("last_scan") != today or st.get("params_used") != p:  # new day, or the rules changed
         if st.get("last_scan") == today:
-            note("Rules were updated, rescanning with the new settings.")
+            note("Rules were updated, rescanning with the new settings.", "scan")
         uni = universe()
         names = {u["symbol"]: u for u in uni}
         P = load_panel([u["symbol"] for u in uni], "2y")
@@ -769,7 +773,12 @@ def live_tick(p=PARAMS, out_dir=None):
         ind = indicators(P, p)
         t = len(P["C"]) - 1
         closes = P["C"].iloc[t].to_dict()
+        stops_before = {s: h.get("stop") for s, h in book["pos"].items()}
         mark(book, closes, ind["atr"].iloc[t].to_dict(), p)
+        raised = [s for s in book["pos"] if book["pos"][s].get("stop") and stops_before.get(s) and
+                  book["pos"][s]["stop"] > stops_before[s] + 0.005]
+        if raised:
+            note("Safety nets raised after new highs: " + ", ".join(f"{s} to ${book['pos'][s]['stop']:,.2f}" for s in raised), "risk")
         first = not book["trades"] and not book["pos"]
         ranks = decide(book, P, ind, t, p, force_rebalance=first)
         regime = bool(ind["regime"].iloc[t])
@@ -805,7 +814,7 @@ def live_tick(p=PARAMS, out_dir=None):
         st["names"] = {s: names.get(s, {}).get("name", "") for s in set(book["pos"]) | {o["sym"] for o in book["pending"]}}
         orders = ", ".join(f"{o['side']} {o['sym']}" for o in book["pending"]) or "no changes"
         note(f"Scanned {len(uni)} stocks ({len(ranks)} passed every filter). Market trend "
-             f"{'OK' if regime else 'DOWN: no new buys'}. Plan for the open: {orders}.")
+             f"{'OK' if regime else 'DOWN: no new buys'}. Plan for the open: {orders}.", "scan")
         if "start_spy" not in st:
             st["start_spy"], st["start_date"] = st["spy_close"], st["scan_date"]
 
@@ -819,6 +828,13 @@ def live_tick(p=PARAMS, out_dir=None):
         st.setdefault("news", {})
         note(f"News check failed ({type(e).__name__}); trading on price rules only.")
     nv = st.get("news", {})
+    seen = st.setdefault("news_seen", {})
+    for sym in book["pos"]:
+        v = nv.get(sym, {}).get("verdict")
+        if v and seen.get(sym) and v != seen[sym]:
+            note(f"News on {sym} changed from {seen[sym]} to {v}: {nv[sym].get('summary', '')}", "news")
+        if v:
+            seen[sym] = v
     bad = lambda sym, levels=("veto", "caution"): nv.get(sym, {}).get("verdict") in levels
     # planned buys hit by bad news are swapped for the next clean candidate
     if book["pending"] and any(o["side"] == "BUY" and bad(o["sym"]) for o in book["pending"]):
@@ -836,7 +852,7 @@ def live_tick(p=PARAMS, out_dir=None):
             taken.add(sym)
         book["pending"] = keep
         for sym in dropped:
-            note(f"Skipped buying {sym}: {nv[sym]['summary']}")
+            note(f"Skipped buying {sym}: {nv[sym]['summary']}", "news")
     # holdings with a serious red flag are sold; a warning sells only if the price confirms (down 5%+ vs the market)
     for sym in list(book["pos"]):
         v = nv.get(sym, {})
@@ -846,20 +862,33 @@ def live_tick(p=PARAMS, out_dir=None):
     syms = sorted(set(book["pos"]) | {o["sym"] for o in book["pending"]} | {"SPY"})
     live = _live_prices(syms)
     prices = {s: v["price"] for s, v in live.items()}
+    spy_t = (live.get("SPY") or {}).get("t") or 0
+    open_now = _market_open(now) and time.time() - spy_t < 900
+    if _market_open(now) and not open_now and st.get("holiday_note") != today:
+        st["holiday_note"] = today
+        note("The clock says the market is open but there are no fresh prices (a market holiday or a data outage). "
+             "No orders until live prices return.", "system")
     p = dict(p, lev_now=lev_for(bool(st.get("regime")), st.get("spy_vol", float("nan")), p))
     mood = (f"the market is calm (S&P 500 swings {st['spy_vol']:.0%} a year)" if st.get("spy_vol", 1) < 0.15 else
             f"the market is normal (S&P 500 swings {st['spy_vol']:.0%} a year)" if st.get("spy_vol", 1) < 0.25 else
             "the market is wild")
-    st["risk"] = dict(exposure=p["lev_now"], spy_vol=st.get("spy_vol"), note=(
-        f"Investing {p['lev_now']:.2f}x the account (borrowing {p['lev_now'] - 1:.0%} at {p.get('margin_rate', 0.06):.0%} "
-        f"a year): the trend is up and {mood}" if p["lev_now"] > 1 else
-        "No borrowing: " + ("the market trend is down" if not st.get("regime") else mood)))
+    gross = sum(h["shares"] * prices.get(s, h["last"]) for s, h in book["pos"].items())
+    eq_now = equity_of(book, prices)
+    actual = gross / eq_now if eq_now > 0 else 0.0
+    target_note = (f"target {p['lev_now']:.2f}x (borrowing {p['lev_now'] - 1:.0%} at {p.get('margin_rate', 0.06):.0%} a year) "
+                   f"because the trend is up and {mood}" if p["lev_now"] > 1 else
+                   "target 1.00x, no borrowing, because " + ("the market trend is down" if not st.get("regime") else mood))
+    st["risk"] = dict(exposure=round(actual, 3), target=p["lev_now"], spy_vol=st.get("spy_vol"),
+                      note=f"Invested {actual:.2f}x the account now; {target_note}. New sizes apply at the next rebalance.")
+    if st.get("last_target") is not None and st["last_target"] != p["lev_now"]:
+        note(f"Risk level changed: {target_note}.", "risk")
+    st["last_target"] = p["lev_now"]
     if st.get("interest_day") != today and now.weekday() < 5 and book["cash"] < 0:
         interest = -book["cash"] * p.get("margin_rate", 0.06) / 252
         book["cash"] -= interest
         st["interest_paid"] = round(st.get("interest_paid", 0) + interest, 2)
     st["interest_day"] = today
-    if _market_open(now):
+    if open_now:
         # live rescan of every stock: fresh prices for the whole market each minute
         try:
             t0 = time.time()
@@ -889,20 +918,23 @@ def live_tick(p=PARAMS, out_dir=None):
                                 gainers=[dict(sym=k, change=round(c, 4)) for c, k in movers[:5]],
                                 losers=[dict(sym=k, change=round(c, 4)) for c, k in movers[-5:][::-1]])
         except Exception as e:
-            note(f"Live rescan failed ({type(e).__name__}); using the morning scan.")
+            note(f"Live rescan failed ({type(e).__name__}); using the morning scan.", "system")
         if book["pending"] or book.get("pending_w"):
             done = len(book["trades"])
             execute(book, prices, today, equity_of(book, prices), p, st.get("atr"))
             for x in book["trades"][done:]:
                 x["at"] = int(time.time())
-                note(f"{x['side']} {x['sym']} @ ${x['price']:,.2f}: {x['reason']}")
+                note(f"{x['side']} {x['sym']}: {x['shares']:.2f} shares @ ${x['price']:,.2f} = ${x['shares'] * x['price']:,.2f}"
+                     + (f", profit {'+' if x['pnl'] >= 0 else '-'}${abs(x['pnl']):,.2f}" if x.get("pnl") is not None else "")
+                     + f". Why: {x['reason']}", "trade")
         lows = {s: v["low"] for s, v in live.items()}
         opens = {s: v["open"] for s, v in live.items()}
         done = len(book["trades"])
         check_stops(book, lows, opens, today)
         for x in book["trades"][done:]:
             x["at"] = int(time.time())
-            note(f"SELL {x['sym']} @ ${x['price']:,.2f}: {x['reason']}")
+            note(f"SELL {x['sym']}: {x['shares']:.2f} shares @ ${x['price']:,.2f}, profit "
+                 f"{'+' if x['pnl'] >= 0 else '-'}${abs(x['pnl']):,.2f}. Why: {x['reason']}", "trade")
     for s, h in book["pos"].items():
         if s in prices:
             h["last"] = prices[s]
@@ -910,8 +942,8 @@ def live_tick(p=PARAMS, out_dir=None):
 
     # optional brokerage copy (Alpaca): only when keys are set as GitHub secrets; never blocks the bot
     import broker
-    if broker.configured() and (_market_open(now) or st.get("broker", {}).get("t", 0) < time.time() - 1800):
-        st["broker"] = broker.sync(book, prices, note)
+    if broker.configured() and (open_now or st.get("broker", {}).get("t", 0) < time.time() - 1800):
+        st["broker"] = broker.sync(book, prices, lambda m: note(m, "trade"))
     elif not broker.configured():
         st["broker"] = dict(connected=False)
 
@@ -926,7 +958,7 @@ def live_tick(p=PARAMS, out_dir=None):
         rows.append(dict(sym=s, price=round(px, 2), line=line, room=round(room, 4) if room is not None else None,
                          stop=round(h["stop"], 2) if h.get("stop") else None,
                          stop_room=round(px / h["stop"] - 1, 4) if h.get("stop") else None))
-    if not _market_open(now):
+    if not open_now:
         verdict = ("Market closed. " + (f"{len(book['pending'])} orders ready for the next open."
                                          if book["pending"] else "Nothing planned for the open."))
     elif not book["pos"]:
@@ -939,7 +971,46 @@ def live_tick(p=PARAMS, out_dir=None):
         verdict = (f"All {len(book['pos'])} holdings above their sell lines and safety nets. Decision: hold. "
                    "A holding is sold instantly if it falls 25% under its best close since buying.")
     st["check"] = dict(t=int(time.time()), verdict=verdict, rows=rows)
-    if live.get("SPY") and now.weekday() < 5 and now.hour >= 9:
+
+    # monitoring: open/close, hourly summaries, and alerts the moment something changes
+    if open_now:
+        if st.get("opened_day") != today:
+            st.update(opened_day=today, checks_today=0, hb_hour=now.hour, hb_n=0, trades_at_open=len(book["trades"]))
+            note(f"Market open. Watching {len(book['pos'])} holdings and rescanning every stock every 30 seconds. "
+                 f"Account ${eq:,.2f}.", "check")
+        st["checks_today"] = st.get("checks_today", 0) + 1
+        st["hb_n"] = st.get("hb_n", 0) + 1
+        if now.hour != st.get("hb_hour"):
+            nets = [(r["stop_room"], r["sym"]) for r in rows if r.get("stop_room") is not None]
+            close_one = min(nets) if nets else None
+            T = _today_numbers(st, eq, prices.get("SPY"), today)
+            h0 = datetime(now.year, now.month, now.day, st.get("hb_hour", now.hour - 1)).replace(tzinfo=bot.ET)
+            span = f"{h0.astimezone(bot.PT):%I:%M %p}".lstrip("0") + " PT"
+            note(f"Hourly check since {span}: {st['hb_n']} checks, every holding watched each time"
+                 + (f", {st.get('rescan', {}).get('scanned', 0):,} stocks rescanned each time" if st.get("rescan") else "")
+                 + (f". Closest to its safety net: {close_one[1]}, {close_one[0]:.0%} above it" if close_one else "")
+                 + f". Account ${eq:,.2f} ({'+' if T['pnl'] >= 0 else '-'}${abs(T['pnl']):,.2f} today).", "check")
+            st.update(hb_hour=now.hour, hb_n=0)
+        alerts = set()
+        for r in rows:
+            if r.get("room") is not None and r["room"] < 0:
+                alerts.add(f"{r['sym']} is below its sell line (${r['line']:,.2f})")
+            if r.get("stop_room") is not None and r["stop_room"] < 0.05:
+                alerts.add(f"{r['sym']} is within 5% of its safety net (${r['stop']:,.2f})")
+        old = set(st.get("alerts", []))
+        for a in sorted(alerts - old):
+            note("Alert: " + a + ".", "alert")
+        for a in sorted(old - alerts):
+            note("Cleared: " + a.replace(" is ", " is no longer ") + ".", "alert")
+        st["alerts"] = sorted(alerts)
+    elif st.get("opened_day") == today and st.get("closed_day") != today and not _market_open(now):
+        st["closed_day"] = today
+        T = _today_numbers(st, eq, prices.get("SPY"), today)
+        n_tr = len(book["trades"]) - st.get("trades_at_open", len(book["trades"]))
+        note(f"Market closed. Today {'+' if T['pnl'] >= 0 else '-'}${abs(T['pnl']):,.2f} ({T['pct'] * 100:+.2f}%)"
+             + (f" vs the S&P 500 {T['spy_pct'] * 100:+.2f}%" if T.get("spy_pct") is not None else "")
+             + f". Account ${eq:,.2f}. {st.get('checks_today', 0)} checks, {n_tr} trade{'s' if n_tr != 1 else ''}.", "check")
+    if live.get("SPY") and (open_now or st.get("opened_day") == today) and now.hour >= 9:
         book["equity"].append([int(time.time()), round(eq, 2), round(live["SPY"]["price"], 2)])
         book["equity"] = book["equity"][-20000:]
         st["days"][today] = [round(eq, 2), round(live["SPY"]["price"], 2)]
@@ -949,7 +1020,7 @@ def live_tick(p=PARAMS, out_dir=None):
     st["updated_at"] = int(time.time())
     if (len(book["trades"]), len(st["log"])) != before:  # something worth saving right away (the loop checks this)
         open(os.path.join(HERE, ".changed"), "w").close()
-    st["log"] = st["log"][-200:]
+    st["log"] = st["log"][-1500:]
     uni_view = st.pop("_universe", None)
     with open(STATE_FILE, "w") as f:
         json.dump(st, f, default=float)

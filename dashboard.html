@@ -516,6 +516,51 @@
   body.sx-lock { overflow: hidden; }
   @media (prefers-reduced-motion: reduce) { .sheet, .sheet-bg { transition: none; } }
 </style>
+
+<style>
+  /* ================================================================ iOS motion layer */
+  .seg-sm button { min-height: 30px; min-width: 0; padding: 0 11px; font-size: 12.5px; }
+  #lv-log-f { display: flex; width: 100%; } #lv-log-f button { flex: 1; }
+  .log .li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; }
+  .lic { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-size: 13px; font-weight: 800;
+         background: rgba(118, 118, 128, .24); color: var(--text-2); margin-top: 2px; }
+  .lic.up { background: var(--up-bg); color: var(--up); } .lic.down { background: var(--down-bg); color: var(--down); }
+  .lic.warn { background: var(--warn-bg); color: var(--warn); }
+  .lk-trade p { color: var(--text); font-weight: 550; }
+  .lk-alert p { color: #ffb3ae; }
+
+  /* tabs slide in from the side you tapped, like a navigation push */
+  .view.in-right { animation: inRight .5s var(--spring); }
+  .view.in-left { animation: inLeft .5s var(--spring); }
+  @keyframes inRight { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+  @keyframes inLeft { from { opacity: 0; transform: translateX(-28px); } to { opacity: 1; transform: none; } }
+  /* the tab bar's active icon pops */
+  .tabs button.pop svg { animation: pop .45s var(--spring); }
+  @keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(.82); } 100% { transform: scale(1.08); } }
+
+  /* accordions open with real height animation (JS drives it) */
+  details.item > .drawer { overflow: hidden; }
+  details.item.anim > .drawer { animation: none; }
+
+  /* pull to refresh */
+  .ptr { position: fixed; left: 50%; top: 64px; z-index: 25; width: 34px; height: 34px; margin-left: -17px; border-radius: 50%;
+         background: #2c2c2e; box-shadow: 0 4px 16px rgba(0, 0, 0, .5); display: grid; place-items: center; opacity: 0;
+         transform: translateY(-40px) scale(.6); pointer-events: none; }
+  .ptr svg { width: 18px; height: 18px; color: var(--text-2); }
+  .ptr.spin svg { animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ptr.back { transition: transform .45s var(--spring), opacity .3s; }
+
+  /* sheet follows the finger while dragging */
+  .sheet.drag { transition: none; }
+  .sheet-grab { cursor: grab; padding: 0; }
+  .sx-head { touch-action: none; }
+
+  /* numbers and cards settle in softly when data refreshes */
+  .flash { animation: flash .9s var(--ease); }
+  @keyframes flash { 0% { background-color: rgba(10, 132, 255, .18); } 100% { background-color: transparent; } }
+  @media (prefers-reduced-motion: reduce) { .view.in-right, .view.in-left, .tabs button.pop svg { animation: none; } }
+</style>
 </head>
 <body>
 <header class="top">
@@ -654,8 +699,12 @@
         </div>
 
         <div class="card o13">
-          <div class="card-h"><h2>Bot log</h2><span class="sub">newest first</span></div>
-          <div class="scroll log" id="lv-log"></div>
+          <div class="card-h"><h2>Bot log</h2><span class="sub" id="lv-log-n">every action, newest first</span></div>
+          <div class="seg seg-sm" id="lv-log-f" role="group" aria-label="Filter the log">
+            <button type="button" data-k="all" class="on">All</button><button type="button" data-k="trade">Trades</button>
+            <button type="button" data-k="alert">Alerts</button><button type="button" data-k="check">Checks</button><button type="button" data-k="other">Other</button>
+          </div>
+          <div class="scroll log" id="lv-log" style="margin-top:10px"></div>
         </div>
       </div>
     </div>
@@ -1126,10 +1175,7 @@ function renderLive(s) {
         <div><b class="down">${pnum(J.avg_loss)}</b><span>average loss</span></div></div>` : "") +
       ((J.lessons || []).length ? `<ul class="lessons">${J.lessons.map(l => `<li>${esc(l)}</li>`).join("")}</ul>` : empty("No lessons yet."));
   });
-  part("log", () => {
-    $("lv-log").innerHTML = (s.log || []).slice().reverse().map(([t, m]) => `<div class="li"><time>${ptStamp(t)}</time><p>${esc(m)}</p></div>`).join("") ||
-      empty("Nothing logged yet.");
-  });
+  part("log", () => renderLog(s));
   part("trades", () => {
     const tr = (b.trades || []).slice().reverse();
     $("lv-trades-s").textContent = tr.length ? `${tr.length} so far` : "";
@@ -1141,6 +1187,29 @@ function renderLive(s) {
       empty("No trades yet.");
   });
 }
+
+// ================================================================ bot log: every action, with a kind for icons and filters
+const LOG_KIND = {trade: ["$", "up"], alert: ["!", "down"], check: ["✓", ""], risk: ["⚖", "warn"], scan: ["⌕", ""],
+                  news: ["✎", ""], learn: ["★", ""], system: ["⚙", ""], info: ["•", ""]};
+const kindOf = e => e[2] || (/^(BUY|SELL|ADD|TRIM)\b/.test(e[1]) ? "trade" : /^Scanned|^Rules were/.test(e[1]) ? "scan"
+  : /^Skipped buying|^News/.test(e[1]) ? "news" : /review|Learned/.test(e[1]) ? "learn" : /failed/.test(e[1]) ? "system" : "info");
+let LOG_F = "all";
+function renderLog(s) {
+  const all = (s.log || []).slice().reverse();
+  const keep = e => { const k = kindOf(e); return LOG_F === "all" || k === LOG_F || (LOG_F === "other" && !["trade", "alert", "check"].includes(k)); };
+  const rows = all.filter(keep).slice(0, 300);
+  $("lv-log-n").textContent = `${all.length} entries, newest first`;
+  $("lv-log").innerHTML = rows.map(e => { const k = kindOf(e), [ic, c] = LOG_KIND[k] || LOG_KIND.info;
+    return `<div class="li lk-${k}"><span class="lic ${c}" aria-hidden="true">${ic}</span><div><time>${ptStamp(e[0])}</time><p>${esc(e[1])}</p></div></div>`; }).join("") ||
+    empty("Nothing logged here yet.");
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("#lv-log-f button");
+  if (!b) return;
+  LOG_F = b.dataset.k;
+  document.querySelectorAll("#lv-log-f button").forEach(x => x.classList.toggle("on", x === b));
+  if (LIVE) renderLog(LIVE);
+});
 
 // the big number glides to its new value instead of jumping
 function tweenMoney(el, to) {
@@ -1648,6 +1717,89 @@ document.addEventListener("keydown", e => {
 });
 // open a stock from anywhere on the page: any element with data-open-stock
 document.addEventListener("click", e => { const el = e.target.closest("[data-open-stock]"); if (el) { sxOpen(); sxUniverse().then(() => sxOpenStock(el.dataset.openStock)); } });
+
+// ================================================================ iOS-style motion
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+// 1) tabs: slide in from the direction of the tab you tapped; tapping the current tab scrolls to the top
+let TAB_NOW = TABS.indexOf((location.hash || "#live").slice(1)) >= 0 ? TABS.indexOf(location.hash.slice(1)) : 0;
+document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => {
+  const i = TABS.indexOf(b.dataset.tab), v = $(b.dataset.tab);
+  if (i === TAB_NOW) { window.scrollTo({top: 0, behavior: REDUCED ? "auto" : "smooth"}); return; }
+  v.classList.remove("in-right", "in-left"); void v.offsetWidth;
+  v.classList.add(i > TAB_NOW ? "in-right" : "in-left");
+  b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop");
+  TAB_NOW = i;
+}, true));
+// 2) accordions: animate the height open and closed instead of snapping
+document.addEventListener("click", e => {
+  const sum = e.target.closest("details.item > summary");
+  if (!sum || REDUCED) return;
+  const d = sum.parentElement, dr = d.querySelector(":scope > .drawer");
+  if (!dr || d.classList.contains("anim")) return;
+  e.preventDefault();
+  d.classList.add("anim");
+  const opts = {duration: 380, easing: "cubic-bezier(.32,.72,0,1)"};
+  if (!d.open) {
+    d.open = true;
+    const h = dr.scrollHeight;
+    dr.animate([{height: "0px", opacity: 0}, {height: h + "px", opacity: 1}], opts).onfinish = () => d.classList.remove("anim");
+  } else {
+    const h = dr.scrollHeight;
+    dr.animate([{height: h + "px", opacity: 1}, {height: "0px", opacity: 0}], Object.assign({}, opts, {duration: 300})).onfinish = () => {
+      d.open = false; d.classList.remove("anim"); };
+  }
+});
+// 3) search sheet: drag it down to dismiss (from the grabber, the header, or the list when it's scrolled to the top)
+(() => {
+  const sh = $("sx"); let y0 = null, dy = 0, t0 = 0;
+  const start = e => {
+    if (innerWidth > 860 || !sh.classList.contains("on")) return;
+    const fromTop = e.target.closest(".sheet-grab, .sx-head") && !e.target.closest("input, button");
+    if (!fromTop && !(e.target.closest(".sx-body") && $("sx-body").scrollTop <= 0)) return;
+    y0 = e.touches[0].clientY; dy = 0; t0 = Date.now();
+  };
+  const move = e => {
+    if (y0 == null) return;
+    dy = Math.max(0, e.touches[0].clientY - y0);
+    if (dy > 4) { sh.classList.add("drag"); sh.style.transform = `translateY(${dy}px)`; if (e.cancelable) e.preventDefault(); }
+  };
+  const end = () => {
+    if (y0 == null) return;
+    const fast = dy / Math.max(1, Date.now() - t0) > 0.6;
+    sh.classList.remove("drag"); sh.style.transform = "";
+    if (dy > 140 || (fast && dy > 40)) sxClose();
+    y0 = null;
+  };
+  sh.addEventListener("touchstart", start, {passive: true});
+  sh.addEventListener("touchmove", move, {passive: false});
+  sh.addEventListener("touchend", end);
+  sh.addEventListener("touchcancel", end);
+})();
+// 4) pull to refresh on phones
+(() => {
+  const ind = document.createElement("div");
+  ind.className = "ptr"; ind.setAttribute("aria-hidden", "true");
+  ind.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><polyline points="20 4 20 9 15 9"/></svg>`;
+  document.body.appendChild(ind);
+  let y0 = null, d = 0, busy = false;
+  addEventListener("touchstart", e => { if (scrollY <= 0 && !busy && !document.body.classList.contains("sx-lock")) { y0 = e.touches[0].clientY; d = 0; } }, {passive: true});
+  addEventListener("touchmove", e => {
+    if (y0 == null) return;
+    d = Math.max(0, e.touches[0].clientY - y0);
+    const k = Math.min(1, d / 90);
+    ind.classList.remove("back");
+    ind.style.opacity = k; ind.style.transform = `translateY(${-40 + 70 * k}px) scale(${.6 + .4 * k}) rotate(${d * 3}deg)`;
+  }, {passive: true});
+  addEventListener("touchend", async () => {
+    if (y0 == null) return;
+    y0 = null;
+    ind.classList.add("back");
+    if (d < 90) { ind.style.opacity = 0; ind.style.transform = ""; return; }
+    busy = true; ind.classList.add("spin"); ind.style.transform = "translateY(30px) scale(1)";
+    try { await loadLive(true); } catch (e) {}
+    ind.classList.remove("spin"); ind.style.opacity = 0; ind.style.transform = ""; busy = false;
+  });
+})();
 
 setInterval(loadLive, 120000);  // every 2 minutes keeps us under the GitHub API limit
 document.addEventListener("visibilitychange", () => {   // phone back from the background: refresh if the data is over a minute old

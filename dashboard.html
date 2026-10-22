@@ -561,6 +561,42 @@
   @keyframes flash { 0% { background-color: rgba(10, 132, 255, .18); } 100% { background-color: transparent; } }
   @media (prefers-reduced-motion: reduce) { .view.in-right, .view.in-left, .tabs button.pop svg { animation: none; } }
 </style>
+
+<style>
+  /* ================================================================ iOS polish, round 3 */
+  :root { --accent: #2997ff; --accent-bg: rgba(41, 151, 255, .16); }
+  body { font-size: 16px; }
+  .card-h h2 { font-size: 20px; letter-spacing: -.03em; }
+  .card { border-radius: 18px; }
+  /* floating glass tab bar, lifted clear of the iPhone home indicator */
+  @media (max-width: 860px) {
+    .tabs { left: 14px; right: 14px; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); height: 66px; padding: 5px;
+            border-radius: 33px; border: .5px solid rgba(255, 255, 255, .1);
+            background: rgba(36, 36, 38, .62); -webkit-backdrop-filter: blur(26px) saturate(190%); backdrop-filter: blur(26px) saturate(190%);
+            box-shadow: 0 10px 34px rgba(0, 0, 0, .55), inset 0 .5px 0 rgba(255, 255, 255, .12); overflow: hidden; }
+    .tabs button, .tabs button.on { position: relative; z-index: 1; min-height: 0; height: 56px; border-radius: 28px; gap: 2px; font-size: 10.5px; }
+    .tabs .glide { position: absolute; z-index: 0; top: 5px; bottom: 5px; left: 0; border-radius: 28px; background: rgba(255, 255, 255, .13);
+                   transition: transform .55s var(--spring), width .55s var(--spring); pointer-events: none; }
+    main { padding-bottom: calc(118px + env(safe-area-inset-bottom, 0px)); }
+    .sx-btn { margin-left: auto; }
+  }
+  @media (min-width: 861px) { .tabs .glide { display: none; } }
+
+  /* holding rows open their own page */
+  #lv-hold summary { cursor: pointer; }
+  .pos-card { margin-top: 14px; padding: 16px; border-radius: 18px; background: #2c2c2e; }
+  .pos-top { display: flex; align-items: baseline; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
+  .pos-l { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .pos-v { font-size: 30px; font-weight: 700; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+  .pos-g { font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .pos-chart { position: relative; height: 200px; margin-top: 10px; }
+  .pos-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-radius: 14px; overflow: hidden; margin-top: 12px; }
+  .pos-grid div { background: #3a3a3c; padding: 10px 12px; }
+  .pos-grid dt { font-size: 12px; color: var(--muted); } .pos-grid dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pos-why { margin: 12px 0 0; font-size: 14px; color: var(--text-2); }
+  .gauge { margin-top: 12px; }
+  .gauge-h { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-2); }
+</style>
 </head>
 <body>
 <header class="top">
@@ -569,7 +605,6 @@
       <svg class="logo" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lgA" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3ee07a"/><stop offset=".55" stop-color="#25b6d2"/><stop offset="1" stop-color="#0a6cff"/></linearGradient><linearGradient id="lgB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect width="64" height="64" rx="15" fill="url(#lgA)"/><rect width="64" height="64" rx="15" fill="url(#lgB)"/><circle cx="17" cy="18.5" r="4.2" fill="#fff"/><path d="M17 48V31.5L28.5 39 47 20.5" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><path d="M37.5 20H47.5V30" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span class="brand-t"><span>iyanstockbot</span><span class="owner">Iyan Shivshankar</span></span>
     </div>
-    <span class="paper" title="No real money is used">PAPER MONEY</span>
     <button class="sx-btn" id="sx-open" type="button" aria-label="Search any stock"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><line x1="15.5" y1="15.5" x2="20.5" y2="20.5"/></svg><span>Search stocks</span><kbd>/</kbd></button>
     <nav class="tabs" aria-label="Sections">
       <button data-tab="live" class="on" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 12 7 12 10 5 14 19 17 12 21 12"/></svg><span>Live portfolio</span></button>
@@ -1662,11 +1697,13 @@ async function sxOpenStock(sym, range = SX.range) {
   const my = ++SX.seq, u = SX.map && SX.map[sym];
   if (!$("sx-detail") || $("sx-detail").dataset.sym !== sym) {
     $("sx-body").innerHTML = `<div class="sx-d" id="sx-detail" data-sym="${esc(sym)}"><button class="sx-back" type="button" id="sx-back">‹ Search</button>
-      <div class="sx-title"><h2>${esc(sym)}</h2><span id="sx-name">${esc(u ? u.name : "")}</span></div>
+      <div class="sx-title"><h2>${esc(sym)}</h2><span id="sx-name">${esc(u ? u.name : "")}</span></div><div id="sx-pos"></div>
+      ${LIVE && LIVE.book && LIVE.book.pos && LIVE.book.pos[sym] ? `<div class="sx-sec" style="margin-top:18px">The stock</div>` : ""}
       <div class="sx-price" id="sx-price">&nbsp;</div><div class="sx-chg" id="sx-chg">&nbsp;</div>
       <div class="seg" id="sx-range" role="group" aria-label="Chart range" style="margin-top:14px">${["1d", "5d", "1mo", "6mo", "1y", "5y"].map(r =>
         `<button type="button" data-r="${r}">${r.replace("mo", "M").replace("d", "D").replace("y", "Y")}</button>`).join("")}</div>
       <div class="sx-chart"><canvas id="sx-c"></canvas></div><div id="sx-stats"></div>${botVerdict(sym)}<div id="sx-news"></div></div>`;
+    positionCard(sym).then(h => { const el = $("sx-pos"); if (el) el.innerHTML = h; });
     $("sx-back").onclick = () => { SX.sym = null; sxSearch($("sx-q").value); };
     $("sx-range").onclick = e => { const b = e.target.closest("button"); if (b) sxOpenStock(sym, b.dataset.r); };
   }
@@ -1800,6 +1837,80 @@ document.addEventListener("click", e => {
     ind.classList.remove("spin"); ind.style.opacity = 0; ind.style.transform = ""; busy = false;
   });
 })();
+
+// ================================================================ floating tab bar: a glass pill glides to the active tab
+(() => {
+  const bar = document.querySelector(".tabs"), glide = document.createElement("span");
+  glide.className = "glide"; bar.prepend(glide);
+  const place = () => {
+    const on = bar.querySelector("button.on"); if (!on) return;
+    glide.style.width = on.offsetWidth + "px"; glide.style.transform = `translateX(${on.offsetLeft}px)`;
+  };
+  bar.addEventListener("click", () => requestAnimationFrame(place));
+  addEventListener("resize", place); requestAnimationFrame(place); setTimeout(place, 300);
+  if (window.ResizeObserver) new ResizeObserver(place).observe(bar);   // the bar's width changes when scrollbars come and go
+})();
+
+// ================================================================ holding sub-dashboard: your money in that stock over time
+function sharesTimeline(s, sym) {
+  const tr = ((s.book && s.book.trades) || []).filter(t => t.sym === sym);
+  let i = tr.map(t => t.side).lastIndexOf("BUY");
+  const ev = []; let sh = 0;
+  for (const t of tr.slice(Math.max(0, i))) {
+    sh += t.side === "BUY" || t.side === "ADD" ? t.shares : t.side === "TRIM" ? -t.shares : 0;
+    const ts = t.at || Date.parse(t.date + "T13:30:00Z") / 1000;
+    ev.push([ts, sh, t]);
+  }
+  return ev;
+}
+async function positionCard(sym) {
+  const s = LIVE, h = s && s.book && s.book.pos && s.book.pos[sym];
+  if (!h) return "";
+  const ev = sharesTimeline(s, sym), since = ev.length ? ev[0][0] : Date.parse(h.date + "T13:30:00Z") / 1000;
+  const cost = h.shares * h.entry, val = h.shares * h.last, g = val - cost;
+  const L = ((s.check || {}).rows || []).find(r => r.sym === sym) || {};
+  const held = Math.max(1, Math.round((nowSec() - since) / 86400));
+  const id = "pos-c-" + sym.replace(/[^A-Za-z0-9]/g, "");
+  const html = `<div class="pos-card"><div class="pos-top"><div><div class="pos-l">YOUR POSITION</div><div class="pos-v">${money(val)}</div></div>
+      <div class="pos-g ${cls(g)}">${signed(g)} (${pct(g / cost, 2)})</div></div>
+      <div class="pos-l" style="margin-top:2px">Value of the bot's ${Number(h.shares).toFixed(2)} shares since ${dayLabel(h.date)} · ${held} day${held > 1 ? "s" : ""}</div>
+      <div class="pos-chart"><canvas id="${id}"></canvas></div>
+      <dl class="pos-grid"><div><dt>Put in</dt><dd>${money(cost)}</dd></div><div><dt>Worth now</dt><dd>${money(val)}</dd></div>
+        <div><dt>Bought at</dt><dd>${money(h.entry)}</dd></div><div><dt>Price now</dt><dd>${money(h.last)}</dd></div>
+        <div><dt>Share of account</dt><dd>${fin(s.equity_now) ? (val / s.equity_now * 100).toFixed(1) + "%" : NA}</dd></div>
+        <div><dt>Best close since buying</dt><dd>${money(h.high)}</dd></div></dl>
+      <div class="gauge"><div class="gauge-h"><span>Room above the safety net (${money(h.stop)})</span><b class="${roomCls(L.stop_room)}">${fin(L.stop_room) ? pct(L.stop_room) : NA}</b></div>${roomBar(L.stop_room, true)}</div>
+      <div class="gauge"><div class="gauge-h"><span>Room above the sell line (${money(L.line)})</span><b class="${roomCls(L.room)}">${fin(L.room) ? pct(L.room) : NA}</b></div>${roomBar(L.room, true)}</div>
+      <p class="pos-why"><b>Why it was bought:</b> ${esc(h.reason)}</p>${newsBlock(s, sym)}</div>`;
+  setTimeout(() => drawPosition(sym, id, ev, h, held), 0);
+  return html;
+}
+async function drawPosition(sym, id, ev, h, held) {
+  const range = held <= 4 ? "5d" : held <= 25 ? "1mo" : held <= 150 ? "6mo" : "1y";
+  let d; try { d = await getJSON(`${STOCK_API}?s=${encodeURIComponent(sym)}&range=${range}`); } catch (e) { return; }
+  const el = $(id); if (!el) return;
+  const t0 = ev.length ? ev[0][0] : 0;
+  const pts = (d.points || []).filter(p => p[0] >= t0 - 1800);
+  const sharesAt = t => { let sh = ev.length ? ev[0][1] : h.shares; for (const e of ev) if (e[0] <= t) sh = e[1]; return sh; };
+  const vals = pts.map(p => sharesAt(p[0]) * p[1]);
+  if (ev.length) { pts.unshift([ev[0][0], ev[0][2].price]); vals.unshift(ev[0][1] * ev[0][2].price); }
+  pts.push([nowSec(), h.last]); vals.push(h.shares * h.last);
+  const cost = h.shares * h.entry, col = vals[vals.length - 1] >= cost ? C.up : C.down;
+  const labels = pts.map(p => ptShort(p[0]));
+  new Chart(el, {type: "line", data: {labels, datasets: [
+      line("Value", vals, col, {fill: true, backgroundColor: fadeFill(col)}),
+      line("Put in", vals.map(() => cost), "#8e8e93", {borderDash: [4, 4], borderWidth: 1, pointHoverRadius: 0, noTip: true})]},
+    options: Object.assign(chartOpts(), {animation: {duration: 600, easing: "easeOutQuart"}, plugins: {legend: {display: false}, tooltip: tooltip()},
+      scales: {x: {display: false}, y: {position: "right", border: {display: false}, grid: {color: C.grid}, ticks: {maxTicksLimit: 4, callback: tickMoney}}}})});
+}
+// tapping a holding opens its own page (instead of the small drop-down)
+document.addEventListener("click", e => {
+  const sum = e.target.closest("#lv-hold details > summary");
+  if (!sum) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  const sym = sum.parentElement.dataset.k.replace(/^h-/, "");
+  sxOpen(); sxUniverse().then(() => sxOpenStock(sym));
+}, true);
 
 setInterval(loadLive, 120000);  // every 2 minutes keeps us under the GitHub API limit
 document.addEventListener("visibilitychange", () => {   // phone back from the background: refresh if the data is over a minute old

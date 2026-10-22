@@ -660,6 +660,11 @@ RULES = [
          evidence="Every step up earned less with today's rules: 72%, 65%, 58%, 48% vs 81%/yr (all stocks); 52%, 46%, 41%, 35% vs 58% (600 biggest). Losses shrink a little too, but 7 makes the most money."),
     dict(kept=False, rule="Brake: stop borrowing after the account falls 10-20% from its peak.", source="Training round, Oct 21 2026",
          evidence="Cut the average worst drop from -44% to -37/-40% but gave up 16-18 points a year (all stocks) and 7-10 (600 biggest)."),
+    dict(kept=False, rule="Profit lock: once the account reaches a new high, never let it fall back below it (or below 50-90% of the gain): sell everything when it dips under that line.",
+         source="Training round, Oct 22 2026 (your request)",
+         evidence="Locking 100% of gains: 81% to 26%/yr (all stocks) and 58% to 20% (600 biggest), and the worst drop barely improved. It sold on every dip, sat in cash, and missed the rebounds. Locking 50% only after a +10% gain cost 6-10 points a year. The 25% safety net per stock is the version that tested well."),
+    dict(kept=False, rule="Blend 60, 90 and 120-day trends into one ranking.", source="Training round, Oct 22 2026",
+         evidence="Lost on all stocks (61-75% vs 81%/yr) and was mixed on the 600 biggest (56-59% vs 58%)."),
     dict(kept=False, rule="Sell everything the day the S&P 500 drops below its 200-day average.", source="Training round, Oct 21 2026",
          evidence="Earned less (78% vs 81%/yr, 52% vs 58%) with the same or deeper drops: it sold into dips that recovered."),
 ]
@@ -730,6 +735,17 @@ def prices_spy_pct(live, st):
     spy = live.get("SPY")
     prev = st.get("spy_close") if st.get("scan_date", "") < datetime.now(bot.ET).date().isoformat() else None
     return (spy["price"] / prev - 1) if spy and prev else None
+
+
+def next_rebalance(day, p=PARAMS):
+    """The next date (after today) when the bot does its full rebalance."""
+    d = datetime.fromisoformat(day)
+    for k in range(1, 7 * max(1, p.get("every_weeks", 1)) + 8):
+        x = d + pd.Timedelta(days=k)
+        if x.weekday() == p["rebalance_day"] and (p.get("every_weeks", 1) == 1 or
+                                                   x.isocalendar()[1] % p["every_weeks"] == p.get("phase", 0) % p["every_weeks"]):
+            return x.date().isoformat()
+    return None
 
 
 def _market_open(now):
@@ -970,6 +986,18 @@ def live_tick(p=PARAMS, out_dir=None):
     else:
         verdict = (f"All {len(book['pos'])} holdings above their sell lines and safety nets. Decision: hold. "
                    "A holding is sold instantly if it falls 25% under its best close since buying.")
+    acted = book["trades"][before[0]:]
+    nr = next_rebalance(today, p)
+    if open_now and acted:
+        verdict = "Decision: " + ", ".join(f"{x['side']} {x['sym']}" for x in acted) + ". Details in the bot log."
+    elif open_now and book["pos"] and not warn:
+        scanned = st.get("rescan", {}).get("scanned")
+        verdict = (f"Decision: WAIT, hold all {len(book['pos'])}. "
+                   + (f"Rescanned {scanned:,} stocks: " if scanned else "")
+                   + "no holding is breaking down and none is near its safety net"
+                   + (f"; swaps happen at the {datetime.fromisoformat(nr):%a %b} {datetime.fromisoformat(nr).day} rebalance "
+                      "(swapping between rebalances lost money in testing)." if nr else "."))
+    st["next_rebalance"] = nr
     st["check"] = dict(t=int(time.time()), verdict=verdict, rows=rows)
 
     # monitoring: open/close, hourly summaries, and alerts the moment something changes

@@ -47,6 +47,16 @@ Dashboard: https://iyanstockbot.vercel.app (also https://nvda-paper-bot.vercel.a
 | Sell on a 5% / 8% one-day drop | 3.4% / 13.7% | 12.3% / 25.9% |
 | Hold 15 / 20 stocks | 15.5% / 13.4% | 16.1% / 13.7% |
 
+## Live data and the crowd
+
+- `vercel/api/live.js` serves the bot's newest data: it reads the `data` branch's current commit from git's smart-HTTP
+  ref list (fresh, no API rate limit) and fetches the file at that commit. The dashboard polls it every 15 seconds while
+  the market is open and every 2 minutes otherwise.
+- `news.py` adds StockTwits trader mood, Nasdaq's next earnings date and analyst price targets for every holding and
+  the next candidates; the daily scan publishes upcoming earnings dates for every scanned stock. These are shown for
+  context. Earnings-based trading rules were tested on 10 years of Nasdaq earnings data and rejected (selling before
+  earnings cut returns from 99% to 59% a year).
+
 ## Stock search
 
 The dashboard's search finds any stock worldwide (`vercel/api/stock.js` proxies Yahoo Finance for quotes, charts and

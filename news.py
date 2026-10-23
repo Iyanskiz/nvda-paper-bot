@@ -13,6 +13,7 @@ within hours. So:
 A failed fetch is 'unknown', never bad news.
 """
 import email.utils
+import html
 import json
 import os
 import re
@@ -249,6 +250,76 @@ def score(sym, headlines, filings, days_fresh=10):
                 filings=filings, items=items[:12], t=int(time.time()))
 
 
+# ---------------------------------------------------------------- the crowd and the calendar (StockTwits, Nasdaq analysts)
+
+BUZZ_TTL = 15 * 60          # trader chatter moves fast
+CAL_TTL = 12 * 3600         # earnings dates and analyst targets change rarely
+
+
+def stocktwits(sym, limit=30):
+    """What traders are saying right now: bullish/bearish tags on the latest messages, and how busy the stream is."""
+    try:
+        d = json.loads(_get(f"https://api.stocktwits.com/api/2/streams/symbol/{sym}.json", "application/json"))
+    except Exception:
+        return None
+    msgs = d.get("messages") or []
+    bull = sum(1 for m in msgs if ((m.get("entities") or {}).get("sentiment") or {}).get("basic") == "Bullish")
+    bear = sum(1 for m in msgs if ((m.get("entities") or {}).get("sentiment") or {}).get("basic") == "Bearish")
+    ts = [datetime.strptime(m["created_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+          for m in msgs if m.get("created_at")]
+    span_d = (max(ts) - min(ts)) / 86400 if len(ts) > 1 else None
+    return dict(bull=bull, bear=bear, n=len(msgs), per_day=round(len(ts) / max(span_d, 1 / 24), 1) if span_d else None,
+                watchers=(d.get("symbol") or {}).get("watchlist_count"),
+                latest=[dict(text=re.sub(r"\s+", " ", html.unescape(m.get("body", "")))[:160], t=int(ts[k]) if k < len(ts) else None,
+                             tag=((m.get("entities") or {}).get("sentiment") or {}).get("basic"))
+                        for k, m in enumerate(msgs[:3])])
+
+
+def earnings_date(sym):
+    """Next expected earnings report (Nasdaq / Zacks): date and before/after the market."""
+    try:
+        d = json.loads(_get(f"https://api.nasdaq.com/api/analyst/{sym}/earnings-date", "application/json"))
+        txt = (d.get("data") or {}).get("reportText") or ""
+    except Exception:
+        return None
+    m = re.search(r"(\d{2})/(\d{2})/(\d{4})", txt)
+    if not m:
+        return None
+    when = "before the open" if "before market open" in txt else "after the close" if "after market close" in txt else ""
+    return dict(date=f"{m.group(3)}-{m.group(1)}-{m.group(2)}", when=when)
+
+
+def analysts(sym):
+    """Wall Street consensus: average price target and buy/hold/sell counts (Nasdaq)."""
+    try:
+        d = json.loads(_get(f"https://api.nasdaq.com/api/analyst/{sym}/targetprice", "application/json"))
+        c = (d.get("data") or {}).get("consensusOverview") or {}
+    except Exception:
+        return None
+    if not c.get("priceTarget"):
+        return None
+    return dict(target=c.get("priceTarget"), low=c.get("lowPriceTarget"), high=c.get("highPriceTarget"),
+                buy=c.get("buy"), hold=c.get("hold"), sell=c.get("sell"))
+
+
+def crowd(sym, c, now):
+    """Refresh the crowd/calendar data for one symbol inside its cache entry; returns the public view."""
+    if now - c.get("buzz_t", 0) >= BUZZ_TTL:
+        st = stocktwits(sym)
+        if st is not None:
+            c.update(buzz=st, buzz_t=now)
+    if now - c.get("cal_t", 0) >= CAL_TTL:
+        e, a = earnings_date(sym), analysts(sym)
+        if e is not None or a is not None:
+            c.update(earn=e, analysts=a, cal_t=now)
+    b = c.get("buzz")
+    mood = None
+    if b and (b["bull"] + b["bear"]) >= 5:
+        share = b["bull"] / (b["bull"] + b["bear"])
+        mood = "bullish" if share >= .7 else "bearish" if share <= .4 else "mixed"
+    return dict(buzz=b, mood=mood, earnings=c.get("earn"), analysts=c.get("analysts"))
+
+
 # ---------------------------------------------------------------- cached batch lookups
 
 def _load_cache():
@@ -288,6 +359,10 @@ def check(symbols, threads=6):
         res = score(sym, entry.get("heads") or [], entry.get("files") or [])
         if not (h_ok or f_ok):
             res.update(verdict="unknown", summary="Couldn't load news right now; trading on price rules only.")
+        try:
+            res["crowd"] = crowd(sym, entry, now)    # StockTwits mood, next earnings date, analyst targets
+        except Exception:
+            res["crowd"] = None
         return sym, entry, res
 
     out = {}

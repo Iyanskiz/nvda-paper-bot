@@ -56,11 +56,32 @@ PARAMS = dict(
 # ---------------------------------------------------------------- data
 
 def universe(min_cap=2e9, min_price=5.0):
-    """Every NYSE/Nasdaq/AMEX stock from Nasdaq's screener, filtered to real companies."""
-    req = urllib.request.Request("https://api.nasdaq.com/api/screener/stocks?tableonly=true&download=true",
-                                 headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        rows = json.load(r)["data"]["rows"]
+    """Every NYSE/Nasdaq/AMEX stock from Nasdaq's screener, filtered to real companies.
+    The raw list is cached for the day: the 30-second rescans don't need to download it again (and a flaky
+    download would otherwise cost a rescan)."""
+    day = datetime.now(bot.ET).date().isoformat()
+    path = os.path.join(CACHE, f"screener_{day}.json")
+    rows = None
+    if os.path.exists(path):
+        try:
+            rows = json.load(open(path))
+        except Exception:
+            rows = None
+    if rows is None:
+        req = urllib.request.Request("https://api.nasdaq.com/api/screener/stocks?tableonly=true&download=true",
+                                     headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+        for k in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    rows = json.load(r)["data"]["rows"]
+                break
+            except Exception:
+                if k == 2:
+                    raise
+                time.sleep(2 + 3 * k)
+        os.makedirs(CACHE, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(rows, f)
     num = lambda s: float(str(s).replace("$", "").replace(",", "") or 0)
     out = []
     for r in rows:
@@ -68,6 +89,44 @@ def universe(min_cap=2e9, min_price=5.0):
         if sym.isalpha() and num(r["marketCap"]) >= min_cap and num(r["lastsale"]) >= min_price:
             out.append(dict(symbol=sym, name=_short_name(r["name"]), sector=r["sector"] or "", cap=num(r["marketCap"])))
     return sorted(out, key=lambda x: -x["cap"])
+
+
+def earnings_calendar(days_ahead=35):
+    """Who reports earnings in the coming weeks (Nasdaq calendar): {symbol: {"date", "when"}}, cached for the day."""
+    day = datetime.now(bot.ET).date()
+    path = os.path.join(CACHE, f"earncal_{day.isoformat()}.json")
+    if os.path.exists(path):
+        try:
+            return json.load(open(path))
+        except Exception:
+            pass
+    dates = [day + pd.Timedelta(days=k) for k in range(days_ahead)]
+    dates = [d for d in dates if d.weekday() < 5]
+
+    def get(d):
+        url = f"https://api.nasdaq.com/api/calendar/earnings?date={d.isoformat()}"
+        for k in range(3):
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    return d.isoformat(), (json.load(r).get("data") or {}).get("rows") or []
+            except Exception:
+                time.sleep(1 + 2 * k)
+        return d.isoformat(), None
+    with ThreadPoolExecutor(3) as ex:
+        got = list(ex.map(get, dates))
+    out = {}
+    for d, rows in got:
+        for r in rows or []:
+            sym = (r.get("symbol") or "").strip()
+            if sym and sym not in out:
+                tm = r.get("time") or ""
+                out[sym] = dict(date=d, when="before the open" if "pre-market" in tm else "after the close" if "after-hours" in tm else "")
+    if all(rows is not None for _, rows in got):
+        os.makedirs(CACHE, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(out, f)
+    return out
 
 
 def _short_name(name):
@@ -743,6 +802,9 @@ RULES = [
     dict(kept=False, rule="Profit lock: once the account reaches a new high, never let it fall back below it (or below 50-90% of the gain): sell everything when it dips under that line.",
          source="Training round, Oct 22 2026 (your request)",
          evidence="Locking 100% of gains: 81% to 26%/yr (all stocks) and 58% to 20% (600 biggest), and the worst drop barely improved. It sold on every dip, sat in cash, and missed the rebounds. Locking 50% only after a +10% gain cost 6-10 points a year. The 25% safety net per stock is the version that tested well."),
+    dict(kept=False, rule="Dodge earnings: sell a holding before its earnings report (or don't buy one that reports within days), or favor stocks that just beat estimates / drop ones that just missed.",
+         source="Training round, Oct 23 2026, using 10 years of Nasdaq earnings dates and surprises (137,846 reports)",
+         evidence="Selling before earnings cut returns from 99% to 59%/yr (all stocks) and 59% to 40% (600 biggest): momentum stocks make much of their money on earnings day. Skipping buys near earnings, chasing beats and dropping misses all did the same or worse. The bot holds through earnings and shows the next report date."),
     dict(kept=False, rule="Market breadth (share of stocks above their 200-day average) as the regime or the borrowing signal; ranking by a stock's own move after removing the market's (residual momentum); scaling exposure by the bot's own recent volatility.",
          source="Research workflow, Oct 22 2026",
          evidence="None beat the current rules on both datasets. Volatility scaling cut losses on all stocks but cost profit; breadth-based borrowing only added risk; residual momentum lost on the 600 biggest."),
@@ -906,8 +968,16 @@ def live_tick(p=PARAMS, out_dir=None):
                          rank_of.get(s), cut(P["C"][s].iloc[t] / P["C"][s].iloc[t - p["window"] + 1] - 1),
                          cut(ind["r2"][s].iloc[t], 2), cut(ind["high52"][s].iloc[t], 3), cut(ind["ma"][s].iloc[t], 2),
                          None if s in rank_of else why_filtered(P, ind, t, s, p)])
+        try:
+            cal = earnings_calendar()
+        except Exception:
+            cal = {}
+        for row in allv:
+            e = cal.get(row[0])
+            row.append(f"{e['date']}|{e['when']}" if e else None)
+        st["earnings_next"] = {s: cal[s] for s in book["pos"] if s in cal}
         st["_universe"] = dict(date=P["C"].index[t], cols=["sym", "name", "sector", "price", "rank", "gain90", "smooth",
-                                                          "of_high", "ma100", "why_not"], rows=allv, passed=len(ranks))
+                                                          "of_high", "ma100", "why_not", "earn"], rows=allv, passed=len(ranks))
         st["holding_status"] = {s: (why_filtered(P, ind, t, s, p) or f"rank #{ranks.index(s) + 1}" if s in ranks else
                                     why_filtered(P, ind, t, s, p) or "outside the ranking") for s in book["pos"]}
         st["names"] = {s: names.get(s, {}).get("name", "") for s in set(book["pos"]) | {o["sym"] for o in book["pending"]}}

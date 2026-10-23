@@ -722,6 +722,10 @@
   .chart canvas, .sx-chart canvas, .pos-chart canvas { touch-action: pan-y; }
 </style>
 <style>
+  .crowd { margin: 0; background: #2c2c2e; border-radius: 12px; overflow: hidden; }
+  .crowd > div { padding: 11px 16px; position: relative; }
+  .crowd > div + div::before { content: ""; position: absolute; top: 0; left: 16px; right: 0; height: .5px; background: var(--line); }
+  .crowd dt { font-size: 13px; color: var(--muted); } .crowd dd { margin: 2px 0 0; font-size: 15px; line-height: 20px; }
   /* ================================================================ iOS HIG layer (large titles, inset groups, type ramp, system colors, glass bars) */
 :root {
   --glass: rgba(44, 44, 48, .5);
@@ -1393,6 +1397,7 @@ Chart.register({id: "touchRelease", afterInit(chart) {
 // and the copy published with the page only updates once a day. Ask all three and show whichever is newest.
 const DATA_API = "https://api.github.com/repos/Iyanskiz/nvda-paper-bot/contents/scanner.json?ref=data";
 const DATA_RAW = "https://raw.githubusercontent.com/Iyanskiz/nvda-paper-bot/data/scanner.json";
+const LIVE_API = /vercel\.app$/.test(location.hostname) ? "/api/live" : "https://iyanstockbot.vercel.app/api/live";
 async function getJSON(url, headers = {}) {
   const r = await fetch(url, {cache: "no-store", headers});
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -1400,6 +1405,8 @@ async function getJSON(url, headers = {}) {
 }
 async function getLive() {
   if (new URLSearchParams(location.search).has("local")) return getJSON("scanner.json?t=" + Date.now());  // previews/tests
+  // first choice: our live endpoint (always the newest commit of the data branch, shared 10-second edge cache, no rate limit)
+  try { const d = await getJSON(LIVE_API + "?t=" + Math.floor(Date.now() / 5000)); if (d && d.book) return d; } catch (e) {}
   const tries = await Promise.allSettled([
     getJSON(DATA_API, {Accept: "application/vnd.github.raw+json"}),  // limited to 60 requests an hour per visitor
     getJSON(DATA_RAW + "?t=" + Date.now()),
@@ -1735,7 +1742,7 @@ async function sparkFetch(sym, h) {
   const t0 = Date.parse(h.date + "T13:30:00Z") / 1000, held = (nowSec() - t0) / 86400;
   const range = held <= 4 ? "5d" : held <= 25 ? "1mo" : held <= 150 ? "6mo" : "1y";
   try {
-    const d = await getJSON(`${STOCK_API}?s=${encodeURIComponent(sym)}&range=${range}`);
+    const d = await getJSON(`${STOCK_API}?s=${encodeURIComponent(sym)}&range=${range}&crowd=0`);
     SPARK[sym] = {t: Date.now(), pts: (d.points || []).filter(p => p[0] >= t0 - 1800 && fin(p[1]))};
   } catch (e) { SPARK[sym] = {t: Date.now() - 240000, pts: SPARK[sym].pts}; }   // try again in a minute
   sparkDraw(sym);
@@ -2160,7 +2167,7 @@ const SX = {uni: null, map: null, chart: null, timer: 0, seq: 0, range: "6mo", s
 async function sxUniverse() {
   if (SX.uni) return SX.uni;
   const urls = new URLSearchParams(location.search).has("local") ? ["universe.json"]
-    : [DATA_RAW.replace("scanner.json", "universe.json") + "?t=" + Math.floor(Date.now() / 600000), "universe.json"];
+    : [LIVE_API + "?f=universe.json", DATA_RAW.replace("scanner.json", "universe.json") + "?t=" + Math.floor(Date.now() / 600000), "universe.json"];
   for (const u of urls) {
     try {
       const d = await getJSON(u);
@@ -2207,6 +2214,37 @@ async function sxSearch(q) {
   draw([], true);
   try { const r = await getJSON(`${STOCK_API}?q=${encodeURIComponent(q)}`); draw(r.quotes || []); } catch (e) { draw([]); }
 }
+// what traders, the calendar and Wall Street say (shown for context; the bot's trades follow its tested rules)
+// merge what the bot collected (earnings dates for every scanned stock, analysts + StockTwits for its watch list)
+// with the live lookup from the stock endpoint
+function crowdFor(sym, live) {
+  const bot = (LIVE && LIVE.news && LIVE.news[sym] && LIVE.news[sym].crowd) || {}, u = SX.map && SX.map[sym];
+  const out = Object.assign({}, bot, live || {});
+  if (!out.earnings && bot.earnings) out.earnings = bot.earnings;
+  if (!out.analysts && bot.analysts) out.analysts = bot.analysts;
+  if (!out.buzz && bot.buzz) out.buzz = Object.assign({mood: bot.mood}, bot.buzz);
+  if (!out.earnings && u && u.earn) { const [date, when] = String(u.earn).split("|"); out.earnings = {date, when}; }
+  if (!out.earnings && LIVE && LIVE.earnings_next && LIVE.earnings_next[sym]) out.earnings = LIVE.earnings_next[sym];
+  return out;
+}
+function crowdCard(c, price) {
+  if (!c || !(c.buzz || c.earnings || c.analysts)) return "";
+  const rows = [];
+  if (c.buzz) {
+    const b = c.buzz, mood = b.mood ? `<b class="${b.mood === "bullish" ? "up" : b.mood === "bearish" ? "down" : ""}">${esc(b.mood)}</b>` : "quiet";
+    rows.push(`<div><dt>Traders on StockTwits</dt><dd>${mood} · ${int(b.bull)} bullish / ${int(b.bear)} bearish of the last ${int(b.n)} posts${fin(b.watchers) ? ` · ${int(b.watchers)} watching` : ""}</dd></div>`);
+  }
+  if (c.earnings) {
+    const days = Math.round((new Date(c.earnings.date + "T12:00") - new Date()) / 86400000);
+    rows.push(`<div><dt>Next earnings report</dt><dd>${dayLabel(c.earnings.date)}${c.earnings.when ? ", " + esc(c.earnings.when) : ""}${days >= 0 ? ` <span class="muted">(in ${days} day${days === 1 ? "" : "s"})</span>` : ""}</dd></div>`);
+  }
+  if (c.analysts) {
+    const a = c.analysts, up = fin(price) && price > 0 ? a.target / price - 1 : null;
+    rows.push(`<div><dt>Wall Street target</dt><dd>$${Number(a.target).toFixed(2)}${up != null ? ` <span class="${cls(up)}">(${pct(up)} from here)</span>` : ""} · ${int(a.buy)} buy, ${int(a.hold)} hold, ${int(a.sell)} sell</dd></div>`);
+  }
+  return `<div class="sx-sec">The crowd</div><dl class="crowd">${rows.join("")}</dl>`;
+}
+
 function botVerdict(sym) {
   const own = LIVE && LIVE.book && LIVE.book.pos && LIVE.book.pos[sym], u = SX.map && SX.map[sym], n = (LIVE && LIVE.params && LIVE.params.n) || 7;
   let head, body;
@@ -2243,7 +2281,7 @@ async function sxOpenStock(sym, range = SX.range) {
       <div class="sx-price" id="sx-price">&nbsp;</div><div class="sx-chg" id="sx-chg">&nbsp;</div>
       <div class="seg" id="sx-range" role="group" aria-label="Chart range" style="margin-top:14px">${["1d", "5d", "1mo", "6mo", "1y", "5y"].map(r =>
         `<button type="button" data-r="${r}">${r.replace("mo", "M").replace("d", "D").replace("y", "Y")}</button>`).join("")}</div>
-      <div class="sx-chart"><canvas id="sx-c"></canvas></div><div id="sx-stats"></div>${botVerdict(sym)}<div id="sx-news"></div></div>`;
+      <div class="sx-chart"><canvas id="sx-c"></canvas></div><div id="sx-stats"></div>${botVerdict(sym)}<div id="sx-crowd"></div><div id="sx-news"></div></div>`;
     $("sx-body").scrollTop = 0;
     if (push) sxPushAnim();
     $("sx-detail").querySelector("h2").focus({preventScroll: true});
@@ -2284,6 +2322,7 @@ async function sxOpenStock(sym, range = SX.range) {
     $("sx-chg").innerHTML = `<span class="${cls(c)}">${c >= 0 ? "+" : MINUS}${fmt(Math.abs(c))} (${pct(c / first, 2)})</span> <span class="muted">${esc(when)}</span>`;
   }, () => { $("sx-price").textContent = keep[0]; $("sx-chg").innerHTML = keep[1]; });
   const f = v => fin(v) ? Number(v).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}) : NA;
+  $("sx-crowd").innerHTML = crowdCard(crowdFor(sym, d.crowd), d.price);
   $("sx-stats").innerHTML = `<dl class="sx-stats"><div><dt>Day range</dt><dd>${f(d.dayLow)} – ${f(d.dayHigh)}</dd></div>
     <div><dt>52-week range</dt><dd>${f(d.low52)} – ${f(d.high52)}</dd></div><div><dt>Volume</dt><dd>${compact(d.volume)}</dd></div></dl>`;
   $("sx-news").innerHTML = (d.news || []).length ? `<div class="sx-sec">News</div><div class="sx-list sx-news">${d.news.map(n =>
@@ -2568,7 +2607,7 @@ async function positionCard(sym) {
 }
 async function drawPosition(sym, id, ev, h, held) {
   const range = held <= 4 ? "5d" : held <= 25 ? "1mo" : held <= 150 ? "6mo" : "1y";
-  let d; try { d = await getJSON(`${STOCK_API}?s=${encodeURIComponent(sym)}&range=${range}`); } catch (e) { return; }
+  let d; try { d = await getJSON(`${STOCK_API}?s=${encodeURIComponent(sym)}&range=${range}&crowd=0`); } catch (e) { return; }
   const el = $(id); if (!el) return;
   const t0 = ev.length ? ev[0][0] : 0;
   const pts = (d.points || []).filter(p => p[0] >= t0 - 1800);
@@ -2616,9 +2655,23 @@ addEventListener("keydown", e => {
   if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches("#lv-hold [data-chg]")) { e.preventDefault(); e.target.click(); }
 }, true);
 
-setInterval(loadLive, 120000);  // every 2 minutes keeps us under the GitHub API limit
-document.addEventListener("visibilitychange", () => {   // phone back from the background: refresh if the data is over a minute old
-  if (!document.hidden && Date.now() - LAST_FETCH > 60000) loadLive();
+// live updates: every 15 seconds while the market is open (the bot checks every 30), every 2 minutes otherwise;
+// paused while the page is in the background, and refreshed the moment it comes back
+const marketOpenNow = () => {
+  const p = {}; new Intl.DateTimeFormat("en-US", {timeZone: "America/New_York", weekday: "short", hour: "numeric", minute: "numeric", hour12: false})
+    .formatToParts(new Date()).forEach(x => p[x.type] = x.value);
+  const m = (+p.hour % 24) * 60 + (+p.minute);
+  return !["Sat", "Sun"].includes(p.weekday) && m >= 9 * 60 + 25 && m <= 16 * 60 + 5;
+};
+let LIVE_TIMER = 0;
+function scheduleLive() {
+  clearTimeout(LIVE_TIMER);
+  LIVE_TIMER = setTimeout(async () => { if (!document.hidden) { try { await loadLive(); } catch (e) {} } scheduleLive(); },
+                          marketOpenNow() ? 15000 : 120000);
+}
+scheduleLive();
+document.addEventListener("visibilitychange", () => {   // phone back from the background: refresh if the data is over 15 seconds old
+  if (!document.hidden && Date.now() - LAST_FETCH > 15000) { loadLive(); scheduleLive(); }
 });
 
 // ================================================================ iOS navigation: the sheet keeps a real stack (search -> stock), backed by history

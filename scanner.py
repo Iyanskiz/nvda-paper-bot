@@ -46,6 +46,10 @@ PARAMS = dict(
                          # under 15% -> 1.5x, 15-25% -> 1.25x, wilder -> no borrowing (beat flat 1.25x in 100% of timings)
     margin_rate=0.06,    # yearly interest on borrowed money
     cooldown_days=90,    # after selling on a broken trend, move on: no rebuy for 90 days (free in tests; "forever" cost 2-4%/yr)
+    mid_rank=3,          # between rebalances, a holding that drops out of the top n x 3 (21) is sold at the next open and its
+                         # money moves to the best-ranked stock not held (all stocks 81% -> 99%/yr, worst drop -44% -> -38%)
+    park="BIL",          # idle cash waits in a T-bill ETF instead of earning nothing (+0.5-0.8 points a year, no extra risk)
+    park_band=0.02,      # only move cash in or out of T-bills when the change is 2%+ of the account
 )
 
 
@@ -178,7 +182,55 @@ def new_book(cash=bot.START_CASH):
 
 
 def equity_of(book, prices):
-    return book["cash"] + sum(h["shares"] * prices.get(s, h["last"]) for s, h in book["pos"].items())
+    return (book["cash"] + sum(h["shares"] * prices.get(s, h["last"]) for s, h in book["pos"].items())
+            + parked_value(book, prices))
+
+
+def parked_value(book, prices):
+    sl = book.get("parked")
+    return sl["shares"] * prices.get(sl["sym"], sl["last"]) if sl else 0.0
+
+
+def unpark(book, prices):
+    """Sell the T-bill ETF back to cash (before buying stocks). Returns the dollars freed."""
+    sl = book.get("parked")
+    if not sl:
+        return 0.0
+    px = prices.get(sl["sym"], sl["last"])
+    got = sl["shares"] * px * (1 - FEE)
+    book["cash"] += got
+    book.pop("parked")
+    return got
+
+
+def park(book, prices, equity_now, p=PARAMS):
+    """Idle cash waits in a T-bill ETF (BIL) instead of earning nothing. Never on borrowed money.
+    Returns the dollar change (+ bought, - sold), 0 when inside the band."""
+    sym = p.get("park")
+    px = prices.get(sym) if sym else None
+    if not sym or px is None or not np.isfinite(px) or equity_now <= 0:
+        return 0.0
+    sl = book.get("parked")
+    have = sl["shares"] * px if sl else 0.0
+    want = max(0.0, book["cash"] + have)          # all idle cash, none if the account is borrowing
+    if want < p.get("park_band", 0.02) * equity_now:
+        want = 0.0
+    if abs(want - have) < p.get("park_band", 0.02) * equity_now and not (want == 0 and have > 0):
+        return 0.0
+    delta = want - have
+    if delta > 0:
+        sh = delta / (px * (1 + FEE))
+        book["cash"] -= sh * px * (1 + FEE)
+        book["parked"] = dict(sym=sym, shares=(sl["shares"] if sl else 0.0) + sh, last=px)
+    else:
+        sh = min(-delta / px, sl["shares"])
+        book["cash"] += sh * px * (1 - FEE)
+        left = sl["shares"] - sh
+        if left * px < 1:
+            book.pop("parked")
+        else:
+            sl.update(shares=left, last=px)
+    return delta
 
 
 def decide(book, P, ind, t, p=PARAMS, force_rebalance=False):
@@ -219,6 +271,27 @@ def decide(book, P, ind, t, p=PARAMS, force_rebalance=False):
             kept = [s for s in ranks if s in book["pos"] and s not in selling]
             kept += [s for s in book["pos"] if s not in selling and s not in kept]
             book["pending_w"] = target_weights(ind, t, kept + [o["sym"] for o in orders if o["side"] == "BUY"], p)
+    elif p.get("mid_rank") and book["pos"]:
+        # mid-cycle swap: a holding that fell far out of the ranking (but hasn't broken its trend, that's sold above)
+        # goes; its money moves to the strongest stock not held, if the market trend is up
+        top_k = int(round(p["n"] * p["mid_rank"]))
+        # judged on the full ranking, liquidity included: letting holdings slide to $20M a day tested worse
+        # (all stocks 113% -> 95%/yr in the same backtest), fading trading interest is a real warning sign
+        held_ranks = ranks
+        top = set(held_ranks[:top_k])
+        selling = {o["sym"] for o in orders}
+        cand = [s for s in ranks if s not in book["pos"] and s not in selling and book.get("banned", {}).get(s, "") <= date]
+        for s in [s for s in book["pos"] if s not in top and s not in selling]:
+            where = (f"now #{held_ranks.index(s) + 1}" if s in held_ranks else
+                     (why_filtered(P, ind, t, s, p) or "no longer passes the filters"))
+            orders.append(dict(side="SELL", sym=s, reason=f"dropped out of the top {top_k} ({where}): swapping it for a stronger stock"))
+            if bool(ind["regime"].iloc[t]) and cand:
+                j = cand.pop(0)
+                rank = ranks.index(j) + 1
+                gain = P["C"][j].iloc[t] / P["C"][j].iloc[t - p["window"] + 1] - 1
+                orders.append(dict(side="BUY", sym=j, rank=rank, value=float(book["pos"][s]["shares"] * C.get(s, book["pos"][s]["last"])),
+                                   reason=f"#{rank} strongest steady uptrend: {gain:+.0%} in {p['window']} trading days "
+                                          f"(replacing {s}, which faded)"))
     if not is_rebalance:
         book["pending_w"] = None
     book["pending"] = orders
@@ -267,8 +340,9 @@ def execute(book, prices, date, equity_now, p=PARAMS, atr=None):
         px = prices.get(o["sym"])
         if px is None or not np.isfinite(px) or o["sym"] in book["pos"]:
             continue
-        alloc = min(book["cash"] + borrow_room, slot)
-        if alloc < 0.25 * slot:
+        target = o.get("value") or slot   # a mid-cycle replacement gets the money of the stock it replaces
+        alloc = min(book["cash"] + borrow_room, target)
+        if alloc < 0.25 * target:
             break
         sh = alloc / (px * (1 + FEE))
         book["cash"] -= sh * px * (1 + FEE)
@@ -628,6 +702,12 @@ RULES = [
          source="Tested here, averaged over 20 rebalance timings", evidence="Weekly rebalancing earned far less (12%). 'As many as it needs' (holding every stock above a score bar) also earned less than 7."),
     dict(kept=True, rule="Bet more on the strongest: each stock's share of the account follows its trend score (capped at 35% in one stock), resized at every rebalance.",
          source="Tested here, averaged over 20 rebalance timings", evidence="Beat equal amounts in 85% of timings (all stocks: 21.7% to 25.8%/yr) and 100% (600 biggest: 33.4% to 36.9%). Still ahead with 3x the trading costs."),
+    dict(kept=True, rule="Swap out fading stocks between rebalances: each morning, a holding that dropped out of the top 21 is sold at the open and its money goes straight into the strongest stock the bot doesn't own.",
+         source="Research workflow, Oct 22 2026 (entries-and-exits agent); code audited for look-ahead",
+         evidence="Mean of 20 timings vs the rules before it: all stocks 81% to 99%/yr with the worst drop -44% to -38%; 600 biggest 57% to 59%/yr with the worst drop -48% to -44%. Losses shrank at every nearby setting on both datasets; the profit gain is large on all stocks and small on the 600 biggest."),
+    dict(kept=True, rule="Idle cash never sits still: whenever money is waiting (empty slots, or the market trend is down), it goes into a T-bill ETF (BIL) and comes back out the moment the bot needs it to buy stocks.",
+         source="Research workflow, Oct 22 2026 (defensive-assets agent); audit and robustness checks passed",
+         evidence="+0.8 points a year (all stocks) and +0.5 (600 biggest), ahead in all 40 timing runs, no extra risk. Rotating into bonds or gold instead helped on one dataset only, so it was left out."),
     dict(kept=True, rule="Safety net, checked every 30 seconds: sell a holding the moment it falls 25% under its best close since buying, then don't rebuy it for 90 days.",
          source="Tested here, averaged over 20 rebalance timings", evidence="With score weights: 25.8% to 29.8%/yr and worst drop -51% to -41% (all stocks); 36.9% to 39.2%/yr (600 biggest). It triggers only a few times a year."),
     dict(kept=False, rule="Monthly learning that switches to whatever settings won over the last 12 months.",
@@ -663,6 +743,9 @@ RULES = [
     dict(kept=False, rule="Profit lock: once the account reaches a new high, never let it fall back below it (or below 50-90% of the gain): sell everything when it dips under that line.",
          source="Training round, Oct 22 2026 (your request)",
          evidence="Locking 100% of gains: 81% to 26%/yr (all stocks) and 58% to 20% (600 biggest), and the worst drop barely improved. It sold on every dip, sat in cash, and missed the rebounds. Locking 50% only after a +10% gain cost 6-10 points a year. The 25% safety net per stock is the version that tested well."),
+    dict(kept=False, rule="Market breadth (share of stocks above their 200-day average) as the regime or the borrowing signal; ranking by a stock's own move after removing the market's (residual momentum); scaling exposure by the bot's own recent volatility.",
+         source="Research workflow, Oct 22 2026",
+         evidence="None beat the current rules on both datasets. Volatility scaling cut losses on all stocks but cost profit; breadth-based borrowing only added risk; residual momentum lost on the 600 biggest."),
     dict(kept=False, rule="Blend 60, 90 and 120-day trends into one ranking.", source="Training round, Oct 22 2026",
          evidence="Lost on all stocks (61-75% vs 81%/yr) and was mixed on the 600 biggest (56-59% vs 58%)."),
     dict(kept=False, rule="Sell everything the day the S&P 500 drops below its 200-day average.", source="Training round, Oct 21 2026",
@@ -875,7 +958,7 @@ def live_tick(p=PARAMS, out_dir=None):
         if v.get("verdict") == "veto" and not any(o["sym"] == sym and o["side"] == "SELL" for o in book["pending"]):
             book["pending"].append(dict(side="SELL", sym=sym, reason="news veto: " + ", ".join(v.get("red_flags") or ["red flag"])))
 
-    syms = sorted(set(book["pos"]) | {o["sym"] for o in book["pending"]} | {"SPY"})
+    syms = sorted(set(book["pos"]) | {o["sym"] for o in book["pending"]} | {"SPY"} | ({p["park"]} if p.get("park") else set()))
     live = _live_prices(syms)
     prices = {s: v["price"] for s, v in live.items()}
     spy_t = (live.get("SPY") or {}).get("t") or 0
@@ -937,6 +1020,9 @@ def live_tick(p=PARAMS, out_dir=None):
             note(f"Live rescan failed ({type(e).__name__}); using the morning scan.", "system")
         if book["pending"] or book.get("pending_w"):
             done = len(book["trades"])
+            freed = unpark(book, prices)   # T-bill cash comes back first so it can fund the stock buys
+            if freed:
+                note(f"Moved ${freed:,.2f} out of T-bills ({p['park']}) to fund today's trades.", "trade")
             execute(book, prices, today, equity_of(book, prices), p, st.get("atr"))
             for x in book["trades"][done:]:
                 x["at"] = int(time.time())
@@ -951,6 +1037,13 @@ def live_tick(p=PARAMS, out_dir=None):
             x["at"] = int(time.time())
             note(f"SELL {x['sym']}: {x['shares']:.2f} shares @ ${x['price']:,.2f}, profit "
                  f"{'+' if x['pnl'] >= 0 else '-'}${abs(x['pnl']):,.2f}. Why: {x['reason']}", "trade")
+        moved = park(book, prices, equity_of(book, prices), p)   # idle cash earns the T-bill rate
+        if moved:
+            note(f"{'Parked' if moved > 0 else 'Took back'} ${abs(moved):,.2f} of idle cash "
+                 f"{'in' if moved > 0 else 'from'} T-bills ({p['park']}): cash waiting for the next buy earns interest "
+                 "instead of nothing.", "trade")
+    if book.get("parked") and book["parked"]["sym"] in prices:
+        book["parked"]["last"] = prices[book["parked"]["sym"]]
     for s, h in book["pos"].items():
         if s in prices:
             h["last"] = prices[s]
@@ -1130,7 +1223,7 @@ def main():
         with open(os.path.join(HERE, "dashboard.html"), "rb") as src, open(os.path.join(docs, "index.html"), "wb") as dst:
             dst.write(src.read())
         import shutil
-        for icon in ("icon-180.png", "icon-512.png"):   # app icon for phones' home screens
+        for icon in ("icon-180.png", "icon-512.png", "manifest.json"):   # home-screen app: icons + manifest
             shutil.copy(os.path.join(HERE, icon), os.path.join(docs, icon))
         with open(os.path.join(docs, "rules.json"), "w") as f:
             json.dump(dict(rules=RULES, reality=REALITY, params=PARAMS), f)

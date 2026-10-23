@@ -39,7 +39,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: docs/static
-          key: static-v7-${{ steps.date.outputs.day }}
+          key: static-v8-${{ steps.date.outputs.day }}
 
       - name: Build Backtest and Simulator data
         if: steps.static.outputs.cache-hit != 'true'

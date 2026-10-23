@@ -24,6 +24,11 @@ Dashboard: https://iyanstockbot.vercel.app (also https://nvda-paper-bot.vercel.a
 7. **Smart borrowing:** while the S&P 500 trend is up, 1.5x the account when the market is calm (S&P 500 20-day
    volatility under 15%), 1.25x when normal, 1.0x when wild (over 25%) or in a downtrend; 6%/yr interest on what's borrowed.
    Mean over 20 timings vs flat 1.25x: 70% to 81%/yr (all stocks), 51% to 58% (600 biggest); worst drops about 5 points deeper.
+7b. **Swap fading stocks daily:** between rebalances, a holding that drops out of the top 21 is sold at the open and its
+   money goes to the strongest stock not held (all stocks 81% to 99%/yr, worst drop -44% to -38%; 600 biggest 57% to 59%,
+   -48% to -44%). Idle cash waits in a T-bill ETF (BIL), +0.5-0.8 points a year. Both came from a research workflow of six
+   technique families with independent audit and robustness checks (bonds/gold rotation, breadth, residual momentum,
+   volatility targeting, ATR stops and pullback entries were rejected).
 8. **News:** `news.py` reads Yahoo/Nasdaq/Google headlines and SEC EDGAR filings for holdings and the next candidates.
    Serious red flags block buys and sell holdings; warnings block buys and sell only if the price confirms.
 9. **Live rescan:** all ~2,100 stocks (440+ of them foreign companies listed in the US) re-priced every 30 seconds

@@ -364,6 +364,7 @@ def target_weights(ind, t, syms, p=PARAMS):
         return {}
     sc = ind["score"].iloc[t]
     raw = np.array([max(float(sc.get(s, np.nan)), 1e-9) if np.isfinite(sc.get(s, np.nan)) else 1e-9 for s in syms])
+    raw = raw ** p.get("weight_pow", 1.0)
     w = raw / raw.sum() * min(len(syms) / p["n"], 1.0)
     cap = p.get("weight_cap")
     for _ in range(20):
@@ -379,16 +380,29 @@ def target_weights(ind, t, syms, p=PARAMS):
     return {s: round(float(x), 6) for s, x in zip(syms, w)}
 
 
-def execute(book, prices, date, equity_now, p=PARAMS, atr=None):
-    """Fill pending orders at the given prices (the next open, or the live price). Sells first, then buys."""
+def execute(book, prices, date, equity_now, p=PARAMS, atr=None, retry=False):
+    """Fill pending orders at the given prices (the next open, or the live price). Sells first, then buys.
+    retry=True (live): an order whose stock has no live price yet (the first seconds after the open) stays pending
+    for the next check instead of being dropped, and buys wait until the sells that fund them have filled."""
+    has = lambda s: prices.get(s) is not None and np.isfinite(prices[s])
+    waiting = []
     for o in [o for o in book["pending"] if o["side"] == "SELL"]:
         h = book["pos"].get(o["sym"])
-        px = prices.get(o["sym"])
-        if h is None or px is None or not np.isfinite(px):
+        if h is None:
             continue
-        _sell(book, o["sym"], px, date, o["reason"], p)
+        if not has(o["sym"]):
+            if retry:
+                waiting.append(o)
+            continue
+        _sell(book, o["sym"], prices[o["sym"]], date, o["reason"], p)
     lev = p.get("lev_now", 1.0)
     w = book.pop("pending_w", None)
+    if retry and (waiting or (w is not None and any(not has(s) for s in w if s in book["pos"] or
+                                                     any(o["sym"] == s for o in book["pending"] if o["side"] == "BUY")))):
+        if w is not None:
+            book["pending_w"] = w             # the rebalance waits until every price it needs is in
+        book["pending"] = waiting + [o for o in book["pending"] if o["side"] == "BUY"]
+        return
     if w is not None and p.get("weight") == "score":
         _execute_weighted(book, prices, date, w, lev, p)
         book["pending"] = []
@@ -397,7 +411,11 @@ def execute(book, prices, date, equity_now, p=PARAMS, atr=None):
     borrow_room = equity_now * (lev - 1.0)
     for o in [o for o in book["pending"] if o["side"] == "BUY"]:
         px = prices.get(o["sym"])
-        if px is None or not np.isfinite(px) or o["sym"] in book["pos"]:
+        if o["sym"] in book["pos"]:
+            continue
+        if px is None or not np.isfinite(px):
+            if retry:
+                waiting.append(o)
             continue
         target = o.get("value") or slot   # a mid-cycle replacement gets the money of the stock it replaces
         alloc = min(book["cash"] + borrow_room, target)
@@ -410,7 +428,7 @@ def execute(book, prices, date, equity_now, p=PARAMS, atr=None):
         book["pos"][o["sym"]] = dict(shares=sh, entry=px, date=date, high=px, stop=stop, last=px, reason=o["reason"])
         book["trades"].append(dict(date=date, side="BUY", sym=o["sym"], price=round(px, 4), shares=round(sh, 4),
                                    reason=o["reason"]))
-    book["pending"] = []
+    book["pending"] = waiting
 
 
 def _execute_weighted(book, prices, date, w, lev, p):
@@ -458,9 +476,14 @@ def _execute_weighted(book, prices, date, w, lev, p):
 def _sell(book, s, px, date, reason, p=PARAMS):
     h = book["pos"].pop(s)
     cd = p.get("cooldown_days")
+    if "safety net" in reason and p.get("stop_ban_days"):
+        cd = p["stop_ban_days"]
     if cd and ("below" in reason or "safety net" in reason):  # the trend broke: move on, don't chase it back
         until = "9999-12-31" if cd == "forever" else (datetime.fromisoformat(date) + pd.Timedelta(days=cd)).date().isoformat()
         book.setdefault("banned", {})[s] = until
+    elif p.get("swap_ban") and "dropped out of the top" in reason and px < h["entry"]:
+        # a swap that lost money: don't buy that stock back for a while
+        book.setdefault("banned", {})[s] = (datetime.fromisoformat(date) + pd.Timedelta(days=p["swap_ban"])).date().isoformat()
     book["cash"] += h["shares"] * px * (1 - FEE)
     pnl = h["shares"] * (px * (1 - FEE) - h["entry"] * (1 + FEE))
     book["trades"].append(dict(date=date, side="SELL", sym=s, price=round(px, 4), shares=round(h["shares"], 4),
@@ -488,10 +511,26 @@ def mark(book, closes, atr, p=PARAMS):
             if p["trail_atr"] and a and np.isfinite(a):
                 h["stop"] = max(h["stop"] or 0, h["high"] - p["trail_atr"] * a)
             elif p.get("trail_pct"):
-                h["stop"] = max(h.get("stop") or 0, h["high"] * (1 - p["trail_pct"]))
+                tp = p["trail_pct"]
+                for gain, tighter in p.get("trail_tiers") or []:   # e.g. [[0.5, 0.18]]: after +50%, an 18% net
+                    if h["high"] >= h["entry"] * (1 + gain):
+                        tp = min(tp, tighter)
+                h["stop"] = max(h.get("stop") or 0, h["high"] * (1 - tp))
 
 
 # ---------------------------------------------------------------- backtest
+
+def own_form(lev, equity_hist, p=PARAMS):
+    """The bot judges its own recent results: when its account is below its own N-day average (a losing stretch),
+    it borrows less; when it is above, it may borrow a bit more. Off unless eqc_ma is set."""
+    n = p.get("eqc_ma")
+    if not n or len(equity_hist) < n:
+        return lev
+    avg = sum(equity_hist[-n:]) / n
+    if equity_hist[-1] < avg:
+        return min(lev, p.get("eqc_low", 1.0))
+    return min(lev * p.get("eqc_boost", 1.0), p.get("eqc_cap", 2.0))
+
 
 def lev_for(regime, spy_vol, p=PARAMS):
     """How much of the account to invest: no borrowing in a downtrend, more in calm markets, less in wild ones."""
@@ -508,7 +547,8 @@ def backtest(P, ind, p=PARAMS, start=260):
     curve = []
     p = dict(p)
     for t in range(start, len(dates)):
-        p["lev_now"] = lev_for(bool(ind["regime"].iloc[t - 1]), float(ind["spy_vol"].iloc[t - 1]), p)
+        p["lev_now"] = own_form(lev_for(bool(ind["regime"].iloc[t - 1]), float(ind["spy_vol"].iloc[t - 1]), p),
+                                [c[1] for c in curve], p)
         if book["cash"] < 0:  # interest on borrowed money, one trading day
             book["cash"] -= -book["cash"] * p.get("margin_rate", 0.06) / 252
         row = lambda k: P[k].iloc[t].to_dict()
@@ -1093,7 +1133,17 @@ def live_tick(p=PARAMS, out_dir=None):
             freed = unpark(book, prices)   # T-bill cash comes back first so it can fund the stock buys
             if freed:
                 note(f"Moved ${freed:,.2f} out of T-bills ({p['park']}) to fund today's trades.", "trade")
-            execute(book, prices, today, equity_of(book, prices), p, st.get("atr"))
+            execute(book, prices, today, equity_of(book, prices), p, st.get("atr"), retry=True)
+            if book["pending"] or book.get("pending_w"):
+                tries = st["fill_tries"] = st.get("fill_tries", 0) + 1
+                waiting = ", ".join(f"{o['side']} {o['sym']}" for o in book["pending"]) or "the rebalance"
+                if tries == 1:
+                    note(f"Waiting for live prices before filling: {waiting}. Retrying every 30 seconds.", "system")
+                if tries >= 60:   # 30 minutes without a price: something is wrong with that stock's data
+                    note(f"Gave up on {waiting} after 30 minutes without a live price; the next scan will re-plan.", "system")
+                    book["pending"], book["pending_w"], st["fill_tries"] = [], None, 0
+            else:
+                st["fill_tries"] = 0
             for x in book["trades"][done:]:
                 x["at"] = int(time.time())
                 note(f"{x['side']} {x['sym']}: {x['shares']:.2f} shares @ ${x['price']:,.2f} = ${x['shares'] * x['price']:,.2f}"

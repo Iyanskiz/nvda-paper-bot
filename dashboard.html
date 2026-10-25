@@ -933,7 +933,7 @@ main, .top-in { padding-left: max(16px, env(safe-area-inset-left)); padding-righ
           <div class="hero-spy" id="lv-today-spy"></div>
           <div class="hero-stats">
             <div class="mini"><div class="l">Total profit</div><div class="v" id="lv-pnl">&ndash;</div><div class="s" id="lv-pnl-s"></div></div>
-            <div class="mini"><div class="l" id="lv-vs-l">vs. same $10k in the S&amp;P 500</div><div class="v" id="lv-vs">&ndash;</div><div class="s" id="lv-vs-s"></div></div>
+            <div class="mini"><div class="l" id="lv-vs-l">Same $10k in the S&amp;P 500</div><div class="v" id="lv-vs">&ndash;</div><div class="s" id="lv-vs-s"></div></div>
           </div>
           <p class="hero-note" id="lv-msg"></p>
         </section>
@@ -1686,10 +1686,13 @@ function renderHero(s, start) {
   $("lv-pnl-s").textContent = s.start_date ? `since ${dayLabel(s.start_date)}` : "";
   const spyNow = s.spy_now || s.spy_close;
   if (s.start_spy && spyNow) {
-    const spyVal = start * spyNow / s.start_spy, d = s.equity_now - spyVal;
-    $("lv-vs").textContent = signed(d); $("lv-vs").className = "v " + cls(d);
-    $("lv-vs-l").textContent = "vs. same $10k in the S&P 500";
-    $("lv-vs-s").textContent = `that $10k would be ${money(spyVal)} (${pct(spyNow / s.start_spy - 1, 2)})`;
+    // same layout as "Total profit": what the S&P 500 made (or lost) with the same $10k, and how far ahead the bot is
+    const spyVal = start * spyNow / s.start_spy, spyPnl = spyVal - start, d = s.equity_now - spyVal;
+    $("lv-vs").innerHTML = `${signed(spyPnl)} <span class="pc">(${pct(spyPnl / start, 2)})</span>`;
+    $("lv-vs").className = "v " + cls(spyPnl);
+    $("lv-vs-l").textContent = "Same $10k in the S&P 500";
+    $("lv-vs-s").innerHTML = Math.abs(d) < 0.005 ? "Bot is even with it"
+      : `Bot is <b class="${cls(d)}">${d > 0 ? "ahead" : "behind"} by ${money(Math.abs(d))}</b>`;
   }
   $("lv-msg").textContent = `Started ${dayLabel(s.start_date)} with $${int(start)} of paper money. Latest scan used closing prices from ${dayLabel(s.scan_date)}.`;
 }

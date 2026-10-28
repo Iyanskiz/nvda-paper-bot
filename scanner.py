@@ -42,7 +42,8 @@ PARAMS = dict(
     band=0.10,           # only resize a holding at a rebalance if it's 10%+ off its target (saves fees)
     phase=0,             # which week of the cycle it rebalances in
     leverage=1.25,       # while the S&P 500 trend is up, invest 1.25x the account (borrowing 25%); 1.0x when it's down
-    vol_lev=[[0.15, 1.75], [0.25, 1.4], [9.0, 1.0]],  # round 10/11: spends the risk room the daily swaps freed  # ...refined by how calm the market is: S&P 500 20-day volatility
+    vol_lev=[[0.15, 2.0], [0.25, 1.5], [9.0, 1.0]],   # Iyan chose higher risk (Oct 27): 2x calm / 1.5x normal, the
+                         # best risk-adjusted of the aggressive round-10 settings; 2x is the most a broker allows overnight  # ...refined by how calm the market is: S&P 500 20-day volatility
                          # under 15% -> 1.5x, 15-25% -> 1.25x, wilder -> no borrowing (beat flat 1.25x in 100% of timings)
     margin_rate=0.06,    # yearly interest on borrowed money
     cooldown_days=90,    # after selling on a broken trend, move on: no rebuy for 90 days (free in tests; "forever" cost 2-4%/yr)
@@ -842,7 +843,10 @@ RULES = [
     dict(kept=False, rule="Profit lock: once the account reaches a new high, never let it fall back below it (or below 50-90% of the gain): sell everything when it dips under that line.",
          source="Training round, Oct 22 2026 (your request)",
          evidence="Locking 100% of gains: 81% to 26%/yr (all stocks) and 58% to 20% (600 biggest), and the worst drop barely improved. It sold on every dip, sat in cash, and missed the rebounds. Locking 50% only after a +10% gain cost 6-10 points a year. The 25% safety net per stock is the version that tested well."),
-    dict(kept=True, rule="More borrowing in calm markets: 1.75x when the S&P 500 swings under 15% a year, 1.4x up to 25%, none above that or in a downtrend.",
+    dict(kept=True, rule="Higher risk, chosen by Iyan (Oct 27): borrow 2x when the S&P 500 swings under 15% a year, 1.5x up to 25%, none above that or in a downtrend.",
+         source="Training round 10 (960 backtests on the live engine)",
+         evidence="vs 1.5x/1.25x: all stocks 97% to 124%/yr, 600 biggest 59% to 72%/yr, ahead in 100% of timings, same return per unit of risk. The cost: average worst drop -38% to -47% (all) and -44% to -54% (600 biggest), worst single month about -35%. 2x is the most a US broker lends overnight."),
+    dict(kept=False, rule="More borrowing in calm markets: 1.75x when the S&P 500 swings under 15% a year, 1.4x up to 25%, none above that or in a downtrend.",
          source="Training rounds 10-11, Oct 26-27 2026 (1,360 backtests on the live engine)",
          evidence="vs 1.5x/1.25x: all stocks 97% to 111%/yr, 600 biggest 59% to 66%/yr, ahead in 100% of timings; average worst drop -38% to -43% and -44% to -50%, back to about the risk level before the daily swaps. Every nearby setting also won, and it still wins at 10% interest on borrowed money. Borrowing 2x with 5 stocks earned more (135%) but with -52% to -57% drops: rejected."),
     dict(kept=False, rule="Self-correction by results: borrow less after a losing stretch, ban stocks that lost money, tighten the net on big winners.",

@@ -106,6 +106,18 @@ LADDERS = {"L1.5": [[0.15, 1.5], [0.25, 1.25], [9.0, 1.0]],          # today
            "L1.75": [[0.15, 1.75], [0.25, 1.4], [9.0, 1.0]],
            "L2.0": [[0.12, 2.0], [0.18, 1.6], [0.25, 1.3], [9.0, 1.0]],
            "L2.0b": [[0.15, 2.0], [0.25, 1.5], [9.0, 1.0]]}
+ROUNDS["r11"] = {   # robustness of the round-10 pick: 1.75x when calm, 1.4x normal, 7 stocks
+    "now": {},
+    "pick: calm<15% 1.75 / <25% 1.4": dict(vol_lev=[[0.15, 1.75], [0.25, 1.4], [9.0, 1.0]]),
+    "calm line 12%": dict(vol_lev=[[0.12, 1.75], [0.25, 1.4], [9.0, 1.0]]),
+    "calm line 18%": dict(vol_lev=[[0.18, 1.75], [0.25, 1.4], [9.0, 1.0]]),
+    "calm 1.65x": dict(vol_lev=[[0.15, 1.65], [0.25, 1.4], [9.0, 1.0]]),
+    "calm 1.85x": dict(vol_lev=[[0.15, 1.85], [0.25, 1.4], [9.0, 1.0]]),
+    "normal 1.3x": dict(vol_lev=[[0.15, 1.75], [0.25, 1.3], [9.0, 1.0]]),
+    "normal 1.5x": dict(vol_lev=[[0.15, 1.75], [0.25, 1.5], [9.0, 1.0]]),
+    "now @ 10% margin interest": dict(margin_rate=0.10),
+    "pick @ 10% margin interest": dict(vol_lev=[[0.15, 1.75], [0.25, 1.4], [9.0, 1.0]], margin_rate=0.10),
+}
 ROUNDS["r10"] = {"now": {}}
 for lname, lad in LADDERS.items():
     for n in (5, 6, 7):

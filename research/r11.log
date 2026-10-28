@@ -1,0 +1,25 @@
+400 backtests in 1958s
+
+== all_4y (mean of 20 timings)
+now                                      cagr   97.2 h1   50.0 h2  160.1 dd  -38.0 wDD  -47.4 shp 1.42 wMon  -26.4 beat 0%
+pick: calm<15% 1.75 / <25% 1.4           cagr  111.2 h1   54.6 h2  189.9 dd  -42.8 wDD  -54.2 shp 1.41 wMon  -30.6 beat 100%
+calm line 12%                            cagr  103.5 h1   46.7 h2  183.2 dd  -40.1 wDD  -49.1 shp 1.41 wMon  -27.6 beat 90%
+calm line 18%                            cagr  112.2 h1   55.4 h2  191.6 dd  -43.4 wDD  -54.2 shp 1.41 wMon  -30.8 beat 100%
+calm 1.65x                               cagr  105.7 h1   52.9 h2  177.8 dd  -41.1 wDD  -51.6 shp 1.41 wMon  -28.9 beat 100%
+calm 1.85x                               cagr  116.9 h1   55.5 h2  204.3 dd  -44.4 wDD  -56.8 shp 1.42 wMon  -32.2 beat 100%
+normal 1.3x                              cagr  111.1 h1   53.9 h2  190.9 dd  -42.4 wDD  -54.2 shp 1.42 wMon  -30.5 beat 100%
+normal 1.5x                              cagr  111.6 h1   54.9 h2  190.5 dd  -43.1 wDD  -54.2 shp 1.41 wMon  -30.6 beat 100%
+now @ 10% margin interest                cagr   95.1 h1   48.3 h2  157.3 dd  -38.1 wDD  -47.5 shp 1.41 wMon  -26.4 beat 0%
+pick @ 10% margin interest               cagr  107.5 h1   51.8 h2  185.1 dd  -42.9 wDD  -54.3 shp 1.39 wMon  -30.7 beat 100%
+
+== big600_9y (mean of 20 timings)
+now                                      cagr   58.8 h1   44.3 h2   76.0 dd  -44.1 wDD  -50.5 shp 1.24 wMon  -25.0 beat 0%
+pick: calm<15% 1.75 / <25% 1.4           cagr   65.9 h1   48.1 h2   87.1 dd  -49.5 wDD  -55.8 shp 1.23 wMon  -28.9 beat 100%
+calm line 12%                            cagr   62.2 h1   47.8 h2   79.4 dd  -49.3 wDD  -55.2 shp 1.22 wMon  -26.6 beat 95%
+calm line 18%                            cagr   65.7 h1   47.6 h2   87.4 dd  -51.0 wDD  -59.9 shp 1.21 wMon  -29.0 beat 100%
+calm 1.65x                               cagr   63.4 h1   47.2 h2   82.8 dd  -47.9 wDD  -54.8 shp 1.23 wMon  -27.3 beat 100%
+calm 1.85x                               cagr   68.3 h1   49.1 h2   91.3 dd  -51.2 wDD  -56.8 shp 1.22 wMon  -30.5 beat 100%
+normal 1.3x                              cagr   65.4 h1   47.5 h2   86.8 dd  -48.8 wDD  -54.1 shp 1.23 wMon  -28.9 beat 100%
+normal 1.5x                              cagr   66.5 h1   49.0 h2   87.4 dd  -50.3 wDD  -57.6 shp 1.23 wMon  -28.9 beat 100%
+now @ 10% margin interest                cagr   57.2 h1   42.8 h2   74.1 dd  -44.4 wDD  -50.6 shp 1.22 wMon  -25.0 beat 0%
+pick @ 10% margin interest               cagr   63.2 h1   45.6 h2   84.1 dd  -50.0 wDD  -55.9 shp 1.19 wMon  -29.0 beat 100%

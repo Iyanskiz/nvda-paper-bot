@@ -1,0 +1,35 @@
+600 backtests in 1278s
+
+== all_4y (mean of 20 timings)
+now                                      cagr   97.2 h1   50.0 h2  160.1 dd  -38.0 wDD  -47.4 shp 1.42 wMon  -26.4 beat 0%
+own form: borrow less when losing (50d)  cagr   84.5 h1   37.1 h2  148.3 dd  -36.0 wDD  -42.8 shp 1.42 wMon  -24.3 beat 5%
+own form: borrow less when losing (20d)  cagr   82.8 h1   37.4 h2  143.8 dd  -34.4 wDD  -42.8 shp 1.41 wMon  -23.3 beat 10%
+own form: 50d, x1.2 when winning         cagr   89.5 h1   35.4 h2  165.8 dd  -39.9 wDD  -47.8 shp 1.38 wMon  -27.2 beat 0%
+ban swapped-out losers 30d               cagr   95.9 h1   48.5 h2  159.6 dd  -37.8 wDD  -47.4 shp 1.41 wMon  -26.4 beat 30%
+ban swapped-out losers 90d               cagr   96.2 h1   48.5 h2  160.2 dd  -37.9 wDD  -47.4 shp 1.41 wMon  -26.4 beat 35%
+safety-net ban 180d                      cagr   97.2 h1   50.0 h2  160.1 dd  -38.0 wDD  -47.4 shp 1.42 wMon  -26.4 beat 0%
+tighter net on +50% winners (18%)        cagr  100.6 h1   50.0 h2  169.6 dd  -37.4 wDD  -44.6 shp 1.46 wMon  -25.3 beat 65%
+tighter net: +50%->20%, +100%->15%       cagr   89.7 h1   50.1 h2  142.0 dd  -37.5 wDD  -46.7 shp 1.37 wMon  -26.4 beat 25%
+borrow ladder 1.75/1.5/1.25/1.0          cagr  105.1 h1   48.5 h2  184.7 dd  -41.0 wDD  -49.5 shp 1.40 wMon  -28.5 beat 90%
+borrow 1.75 calm / 1.4 / 1.0             cagr  111.2 h1   54.6 h2  189.9 dd  -42.8 wDD  -54.2 shp 1.41 wMon  -30.6 beat 100%
+6 stocks                                 cagr   92.9 h1   46.3 h2  153.8 dd  -40.5 wDD  -48.6 shp 1.36 wMon  -28.1 beat 35%
+5 stocks                                 cagr  105.7 h1   53.8 h2  173.9 dd  -42.1 wDD  -51.6 shp 1.41 wMon  -27.9 beat 75%
+bet sizes score^1.5                      cagr   97.8 h1   49.5 h2  163.0 dd  -39.4 wDD  -49.0 shp 1.38 wMon  -27.1 beat 50%
+swap at top 18 (2.5x)                    cagr   92.1 h1   45.9 h2  152.5 dd  -38.7 wDD  -47.4 shp 1.38 wMon  -26.6 beat 15%
+
+== big600_9y (mean of 20 timings)
+now                                      cagr   58.8 h1   44.3 h2   76.0 dd  -44.1 wDD  -50.5 shp 1.24 wMon  -25.0 beat 0%
+own form: borrow less when losing (50d)  cagr   52.9 h1   35.6 h2   73.3 dd  -43.2 wDD  -47.4 shp 1.20 wMon  -23.1 beat 0%
+own form: borrow less when losing (20d)  cagr   49.7 h1   35.3 h2   66.7 dd  -42.5 wDD  -49.0 shp 1.18 wMon  -22.5 beat 0%
+own form: 50d, x1.2 when winning         cagr   57.2 h1   36.8 h2   82.2 dd  -49.1 wDD  -54.9 shp 1.17 wMon  -26.0 beat 35%
+ban swapped-out losers 30d               cagr   59.1 h1   44.8 h2   76.0 dd  -44.0 wDD  -50.5 shp 1.25 wMon  -25.0 beat 65%
+ban swapped-out losers 90d               cagr   58.9 h1   44.6 h2   75.7 dd  -44.2 wDD  -50.5 shp 1.24 wMon  -25.0 beat 45%
+safety-net ban 180d                      cagr   58.8 h1   44.3 h2   76.0 dd  -44.1 wDD  -50.5 shp 1.24 wMon  -25.0 beat 0%
+tighter net on +50% winners (18%)        cagr   56.3 h1   47.5 h2   66.7 dd  -44.2 wDD  -51.5 shp 1.23 wMon  -24.2 beat 25%
+tighter net: +50%->20%, +100%->15%       cagr   57.5 h1   47.4 h2   69.3 dd  -43.8 wDD  -51.3 shp 1.25 wMon  -24.2 beat 40%
+borrow ladder 1.75/1.5/1.25/1.0          cagr   63.8 h1   48.4 h2   82.0 dd  -49.0 wDD  -56.6 shp 1.22 wMon  -27.3 beat 100%
+borrow 1.75 calm / 1.4 / 1.0             cagr   65.9 h1   48.1 h2   87.1 dd  -49.5 wDD  -55.8 shp 1.23 wMon  -28.9 beat 100%
+6 stocks                                 cagr   59.3 h1   46.6 h2   74.0 dd  -46.3 wDD  -50.8 shp 1.23 wMon  -24.8 beat 50%
+5 stocks                                 cagr   59.5 h1   47.3 h2   73.6 dd  -45.7 wDD  -52.0 shp 1.20 wMon  -25.5 beat 50%
+bet sizes score^1.5                      cagr   61.9 h1   47.4 h2   79.0 dd  -44.8 wDD  -52.3 shp 1.26 wMon  -25.2 beat 100%
+swap at top 18 (2.5x)                    cagr   57.5 h1   41.6 h2   76.4 dd  -45.2 wDD  -50.5 shp 1.23 wMon  -25.0 beat 40%

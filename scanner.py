@@ -28,7 +28,7 @@ PARAMS = dict(
     n=7,                 # how many stocks to hold: 7 beat 10 in both backtests (5 earned more but swung harder)
     window=90,           # days in the trend regression
     ma=100,              # must close above this moving average to buy or keep
-    max_gap=0.20,        # skip stocks that moved more than 20% in one day lately (news jumps, not trends)
+    max_gap=0.25,        # skip stocks that moved more than 25% in one day lately (round 12: 25% beat 20% at 2x borrowing)
     near_high=0.75,      # must be within 25% of the 52-week high
     min_dollar_vol=50e6, # $50M+ traded a day: real, liquid trends (beat $20M in testing on both datasets)
     regime_ma=200,       # new buys only while SPY is above its 200-day average
@@ -846,6 +846,9 @@ RULES = [
     dict(kept=True, rule="Higher risk, chosen by Iyan (Oct 27): borrow 2x when the S&P 500 swings under 15% a year, 1.5x up to 25%, none above that or in a downtrend.",
          source="Training round 10 (960 backtests on the live engine)",
          evidence="vs 1.5x/1.25x: all stocks 97% to 124%/yr, 600 biggest 59% to 72%/yr, ahead in 100% of timings, same return per unit of risk. The cost: average worst drop -38% to -47% (all) and -44% to -54% (600 biggest), worst single month about -35%. 2x is the most a US broker lends overnight."),
+    dict(kept=True, rule="Jump filter loosened to 25% (was 20%): stocks that jumped up to 25% in one day can still be bought.",
+         source="Training round 12, Oct 28 2026 (520 backtests on the live engine, with 2x borrowing)",
+         evidence="All stocks 124% to 135%/yr (ahead in 75% of timings), 600 biggest 72% to 83% (100%); return per unit of risk rose on both. Worst drop -47% to -53% on all stocks but -54% to -51% on the 600 biggest. Rejected in the same round: 20% or 30% safety nets, 70/120-day trends, stricter liquidity or 52-week-high filters, swapping later (top 24)."),
     dict(kept=False, rule="More borrowing in calm markets: 1.75x when the S&P 500 swings under 15% a year, 1.4x up to 25%, none above that or in a downtrend.",
          source="Training rounds 10-11, Oct 26-27 2026 (1,360 backtests on the live engine)",
          evidence="vs 1.5x/1.25x: all stocks 97% to 111%/yr, 600 biggest 59% to 66%/yr, ahead in 100% of timings; average worst drop -38% to -43% and -44% to -50%, back to about the risk level before the daily swaps. Every nearby setting also won, and it still wins at 10% interest on borrowed money. Borrowing 2x with 5 stocks earned more (135%) but with -52% to -57% drops: rejected."),

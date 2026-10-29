@@ -118,6 +118,21 @@ ROUNDS["r11"] = {   # robustness of the round-10 pick: 1.75x when calm, 1.4x nor
     "now @ 10% margin interest": dict(margin_rate=0.10),
     "pick @ 10% margin interest": dict(vol_lev=[[0.15, 1.75], [0.25, 1.4], [9.0, 1.0]], margin_rate=0.10),
 }
+ROUNDS["r12"] = {   # retune everything else on top of the 2x setting
+    "now": {},
+    "bet sizes score^1.5": dict(weight_pow=1.5),
+    "max 50% in one stock": dict(weight_cap=0.5),
+    "rebalance every 3 weeks": dict(every_weeks=3),
+    "keep top 21 at rebalance": dict(exit_rank=3),
+    "safety net 30%": dict(trail_pct=0.30),
+    "safety net 20%": dict(trail_pct=0.20),
+    "jump filter 25%": dict(max_gap=0.25),
+    "within 15% of 52w high": dict(near_high=0.85),
+    "trend window 120d": dict(window=120),
+    "trend window 70d": dict(window=70),
+    "swap at top 24": dict(mid_rank=3.5),
+    "$100M+ traded a day": dict(min_dollar_vol=100e6),
+}
 ROUNDS["r10"] = {"now": {}}
 for lname, lad in LADDERS.items():
     for n in (5, 6, 7):

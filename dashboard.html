@@ -1463,7 +1463,7 @@ function trendList(rows, s) {
       const t = trackFor(r.rank);
       out += `<div class="grp"><span class="grp-t">${esc(k)}</span>${t ? `<span class="grp-s">Track record at this rank (next month): ${esc(t)}</span>` : ""}</div>`;
     }
-    const bits = [r.sector, fin(r.smooth) ? `smoothness ${Number(r.smooth).toFixed(2)}` : "", fin(r.of_high) ? `${Math.round(r.of_high * 100)}% of 52-wk high` : ""].filter(Boolean);
+    const bits = [r.sector, r.judge ? `AI judge ${Math.round(r.judge.score * 100)}/100` : "", fin(r.smooth) ? `smoothness ${Number(r.smooth).toFixed(2)}` : "", fin(r.of_high) ? `${Math.round(r.of_high * 100)}% of 52-wk high` : ""].filter(Boolean);
     out += `<div class="trow"><span class="rk">${esc(r.rank)}</span>
       <div class="who"><div class="t1"><span class="sym">${esc(r.sym)}</span>${r.held ? '<span class="tag">owned</span>' : ""}${s ? newsBadge(s, r.sym) : ""}</div>
         <div class="name">${esc(r.name)}</div>${bits.length ? `<div class="meta">${bits.map(esc).join(" · ")}</div>` : ""}</div>
@@ -2270,7 +2270,10 @@ function botVerdict(sym) {
   const facts = u ? `<p style="margin-top:8px">90-day move <b class="${cls(u.gain90)}">${pct(u.gain90)}</b> · smoothness ${fin(u.smooth) ? u.smooth.toFixed(2) : NA} of 1 · ` +
     `${fin(u.of_high) ? Math.round(u.of_high * 100) + "% of its 52-week high" : ""} · 100-day average ${money(u.ma100)}` +
     (SX.uniDate ? ` <span class="muted">(scan of ${dayLabel(SX.uniDate)})</span>` : "") + `</p>` : "";
-  return `<div class="sx-bot"><h3>${head}</h3><p>${body}</p>${facts}</div>`;
+  const j = LIVE && LIVE.judge && LIVE.judge[sym];
+  const jl = j ? `<p style="margin-top:8px"><b>AI judge: ${Math.round(j.score * 100)}/100</b> <span class="muted">(vs every other stock that passed today)</span>` +
+    (j.pros.length ? ` · likes its ${j.pros.map(esc).join(" and ")}` : "") + (j.cons.length ? ` · worried about its ${j.cons.map(esc).join(" and ")}` : "") + `</p>` : "";
+  return `<div class="sx-bot"><h3>${head}</h3><p>${body}</p>${facts}${jl}</div>`;
 }
 async function sxOpenStock(sym, range = SX.range) {
   SX.sym = sym; SX.range = range;
@@ -2586,6 +2589,12 @@ function sharesTimeline(s, sym) {
   }
   return ev;
 }
+function judgeLine(s, sym) {
+  const j = s && s.judge && s.judge[sym];
+  if (!j) return "";
+  return `<p class="pos-why"><b>AI judge today: ${Math.round(j.score * 100)}/100</b>` + (j.pros.length ? `. Likes its ${j.pros.map(esc).join(" and ")}` : "") +
+    (j.cons.length ? `; worried about its ${j.cons.map(esc).join(" and ")}` : "") + `.</p>`;
+}
 async function positionCard(sym) {
   const s = LIVE, h = s && s.book && s.book.pos && s.book.pos[sym];
   if (!h) return "";
@@ -2604,7 +2613,7 @@ async function positionCard(sym) {
         <div><dt>Best close since buying</dt><dd>${money(h.high)}</dd></div></dl>
       <div class="gauge"><div class="gauge-h"><span>Room above the safety net (${money(h.stop)})</span><b class="${roomCls(L.stop_room)}">${fin(L.stop_room) ? pct(L.stop_room) : NA}</b></div>${roomBar(L.stop_room, true)}</div>
       <div class="gauge"><div class="gauge-h"><span>Room above the sell line (${money(L.line)})</span><b class="${roomCls(L.room)}">${fin(L.room) ? pct(L.room) : NA}</b></div>${roomBar(L.room, true)}</div>
-      <p class="pos-why"><b>Why it was bought:</b> ${esc(h.reason)}</p>${newsBlock(s, sym)}</div>`;
+      <p class="pos-why"><b>Why it was bought:</b> ${esc(h.reason)}</p>${judgeLine(s, sym)}${newsBlock(s, sym)}</div>`;
   setTimeout(() => drawPosition(sym, id, ev, h, held), 0);
   return html;
 }

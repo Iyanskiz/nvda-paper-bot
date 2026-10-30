@@ -41,7 +41,7 @@ jobs:
           cache: pip
 
       - name: Install the scanner's math libraries
-        run: pip install --quiet numpy pandas
+        run: pip install --quiet numpy pandas lightgbm
 
       - name: Check every 30 seconds while the market is open
         run: bash .github/scripts/trade_loop.sh

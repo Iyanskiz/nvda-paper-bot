@@ -28,9 +28,11 @@ def panel(name):
 
 
 def inds(name, p):
-    key = (name, p["window"], p["ma"], p["regime_ma"])
+    key = (name, p["window"], p["ma"], p["regime_ma"], p.get("judge_src"))
     if key not in _IND:
         _IND[key] = scanner.indicators(panel(name), p)
+        if p.get("judge_src"):                  # walk-forward AI judge scores, built by judge.py / judge_exp.py
+            _IND[key] = dict(_IND[key], judge=pd.read_pickle(os.path.join(HERE, f"judge_{name}_{p['judge_src']}.pkl")))
     return _IND[key]
 
 
@@ -132,6 +134,18 @@ ROUNDS["r12"] = {   # retune everything else on top of the 2x setting
     "trend window 70d": dict(window=70),
     "swap at top 24": dict(mid_rank=3.5),
     "$100M+ traded a day": dict(min_dollar_vol=100e6),
+}
+ROUNDS["r13"] = {   # the AI judge (walk-forward LightGBM), every way it could steer the bot
+    "now": {},
+    "judge ranks (top10%)": dict(judge_src="top10", rank_by="judge"),
+    "blend 50/50 (top10%)": dict(judge_src="top10", rank_by="blend"),
+    "veto worst 20% (top10%)": dict(judge_src="top10", judge_veto=0.2),
+    "veto worst 40% (top10%)": dict(judge_src="top10", judge_veto=0.4),
+    "rerank top40 by judge": dict(judge_src="top10_rerank_top40", rank_by="blend", judge_w=1.0),
+    "blend 50/50 (rerank top40)": dict(judge_src="top10_rerank_top40", rank_by="blend"),
+    "veto worst 30% of top40": dict(judge_src="top10_rerank_top40", judge_veto=0.3),
+    "blend 50/50 (return model)": dict(judge_src="ret", rank_by="blend"),
+    "veto worst 30% (return model)": dict(judge_src="ret", judge_veto=0.3),
 }
 ROUNDS["r10"] = {"now": {}}
 for lname, lad in LADDERS.items():

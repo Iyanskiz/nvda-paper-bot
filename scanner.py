@@ -51,6 +51,8 @@ PARAMS = dict(
                          # money moves to the best-ranked stock not held (all stocks 81% -> 99%/yr, worst drop -44% -> -38%)
     park="BIL",          # idle cash waits in a T-bill ETF instead of earning nothing (+0.5-0.8 points a year, no extra risk)
     park_band=0.02,      # only move cash in or out of T-bills when the change is 2%+ of the account
+    judge_veto=0.2,      # the AI judge (judge.py) blocks the 20% of passing stocks it rates worst. Round 13: giving it
+                         # more say (ranking, blending, bigger vetoes) lost money; this level was free or slightly better
 )
 
 
@@ -213,8 +215,15 @@ def ranking(P, ind, t, p=PARAMS, exclude=("SPY",)):
     ok = (ind["score"].iloc[t] > 0) & (C > ind["ma"].iloc[t]) & (ind["gap"].iloc[t] < p["max_gap"]) \
         & (C >= p["near_high"] * ind["hi"].iloc[t]) & (ind["dvol"].iloc[t] >= p["min_dollar_vol"])
     ok = ok.drop(list(exclude), errors="ignore")
-    scores = ind[p.get("rank_by", "score")].iloc[t][ok[ok].index].dropna().sort_values(ascending=False)
-    return list(scores.index)
+    if "judge" in ind and p.get("judge_veto"):
+        j = ind["judge"].iloc[t].reindex(ok.index)
+        ok &= ~(j < p["judge_veto"])           # the AI judge blocks the stocks it rates worst (unjudged ones pass)
+    if p.get("rank_by") == "blend" and "judge" in ind:
+        sc = ind["score"].iloc[t][ok[ok].index].rank(pct=True)
+        scores = (sc + p.get("judge_w", 0.5) * ind["judge"].iloc[t].reindex(sc.index).fillna(0)).dropna()
+    else:
+        scores = ind[p.get("rank_by", "score")].iloc[t][ok[ok].index].dropna()
+    return list(scores.sort_values(ascending=False).index)
 
 
 def why_filtered(P, ind, t, sym, p=PARAMS):
@@ -785,6 +794,9 @@ def journal(book):
 
 
 RULES = [
+    dict(kept=True, rule="AI judge veto: a machine-learning model (LightGBM, 17 signals per stock, trained on about 200,000 past stock-months) rates every stock that passes the filters, and the bot won't buy or keep the 20% it rates worst.",
+         source="Training round 13, Oct 29 2026 (400 backtests on the live engine, judge trained walk-forward so it never saw the future it was graded on)",
+         evidence="Veto worst 20%: all stocks 135% to 136%/yr (ahead in 65% of timings), 600 biggest 83.2% to 83.1% (a tie), worst drops unchanged. Letting the judge pick the stocks itself collapsed returns (all stocks 135% to 7%/yr, worst drop -73%): it learned that wild stocks land in the top 10% most often, but they also crash most often. Blends of judge and trend score: 72-113%/yr, all worse. A bigger veto (40%) helped all stocks (+7) but hurt the 600 biggest (-2), so it was rejected."),
     dict(kept=True, rule="Scan every US stock worth $2B+ and priced $5+ each morning (~2,100 stocks).",
          source="Nasdaq's full stock list", evidence="Covers the whole market, not one company."),
     dict(kept=True, rule="Rank by how fast and how steadily each stock climbed over 90 trading days.",
@@ -985,6 +997,15 @@ def live_tick(p=PARAMS, out_dir=None):
             P = {k: v.iloc[:-1] for k, v in P.items()}
         ind = indicators(P, p)
         t = len(P["C"]) - 1
+        try:                                   # the AI judge's verdict on every stock that passes the filters
+            import judge as JUDGE
+            jv = JUDGE.live_scores(P, ind, p, t)
+        except Exception as e:
+            jv = None
+            note(f"AI judge failed ({type(e).__name__}); ranking on trend score alone.", "scan")
+        if jv:
+            ind = dict(ind, judge=pd.DataFrame({s: [v["score"]] for s, v in jv.items()}, index=[P["C"].index[t]])
+                       .reindex(index=P["C"].index, columns=P["C"].columns))
         closes = P["C"].iloc[t].to_dict()
         stops_before = {s: h.get("stop") for s, h in book["pos"].items()}
         mark(book, closes, ind["atr"].iloc[t].to_dict(), p)
@@ -995,6 +1016,7 @@ def live_tick(p=PARAMS, out_dir=None):
         first = not book["trades"] and not book["pos"]
         ranks = decide(book, P, ind, t, p, force_rebalance=first)
         regime = bool(ind["regime"].iloc[t])
+        st["judge"] = {s: jv[s] for s in set(ranks[:60]) | set(book["pos"]) if jv and s in jv}
         st["atr"] = {o["sym"]: float(ind["atr"][o["sym"]].iloc[t]) for o in book["pending"] if o["side"] == "BUY"}
         # the 100-day average each holding has to stay above (checked every run, acted on at the close)
         watch = set(book["pos"]) | {o["sym"] for o in book["pending"] if o["side"] == "BUY"}
@@ -1007,7 +1029,7 @@ def live_tick(p=PARAMS, out_dir=None):
             rows.append(dict(rank=i, sym=s, name=names.get(s, {}).get("name", ""), sector=names.get(s, {}).get("sector", ""),
                              price=round(closes[s], 2), gain90=round(float(P["C"][s].iloc[t] / P["C"][s].iloc[t - p["window"] + 1] - 1), 4),
                              smooth=round(float(ind["r2"][s].iloc[t]), 2), of_high=round(float(ind["high52"][s].iloc[t]), 3),
-                             held=s in book["pos"]))
+                             held=s in book["pos"], judge=(jv or {}).get(s)))
         st["top"] = rows
         # the bot's view of every stock it scanned, for the website's search (published once a day)
         rank_of = {s: i for i, s in enumerate(ranks, 1)}

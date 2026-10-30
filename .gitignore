@@ -9,3 +9,7 @@ __pycache__/
 .vercel/
 cache/
 .changed
+
+# walk-forward judge scores (rebuild with research/judge_exp.py)
+research/*.pkl
+research/results/

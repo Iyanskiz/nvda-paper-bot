@@ -1,0 +1,25 @@
+400 backtests in 2203s
+
+== all_4y (mean of 20 timings)
+now                                      cagr  134.9 h1   89.4 h2  191.0 dd  -53.3 wDD  -59.4 shp 1.46 wMon  -44.9 beat 0%
+judge ranks (top10%)                     cagr    6.9 h1   12.8 h2    3.5 dd  -61.6 wDD  -73.3 shp 0.45 wMon  -40.0 beat 0%
+blend 50/50 (top10%)                     cagr  113.1 h1   69.2 h2  168.1 dd  -54.3 wDD  -67.2 shp 1.32 wMon  -43.7 beat 35%
+veto worst 20% (top10%)                  cagr  136.2 h1   90.1 h2  193.4 dd  -53.1 wDD  -59.4 shp 1.47 wMon  -46.2 beat 65%
+veto worst 40% (top10%)                  cagr  142.2 h1  100.6 h2  191.4 dd  -53.1 wDD  -60.2 shp 1.50 wMon  -46.2 beat 85%
+rerank top40 by judge                    cagr  102.5 h1   89.4 h2  115.7 dd  -54.1 wDD  -63.3 shp 1.26 wMon  -45.1 beat 10%
+blend 50/50 (rerank top40)               cagr  110.1 h1   89.4 h2  133.3 dd  -53.9 wDD  -63.7 shp 1.30 wMon  -44.8 beat 15%
+veto worst 30% of top40                  cagr  151.6 h1   89.4 h2  232.1 dd  -51.3 wDD  -57.3 shp 1.53 wMon  -44.6 beat 85%
+blend 50/50 (return model)               cagr   90.5 h1   91.6 h2   90.5 dd  -56.4 wDD  -64.0 shp 1.16 wMon  -37.7 beat 0%
+veto worst 30% (return model)            cagr   84.8 h1  103.4 h2   70.2 dd  -52.6 wDD  -59.1 shp 1.16 wMon  -41.8 beat 0%
+
+== big600_9y (mean of 20 timings)
+now                                      cagr   83.2 h1   50.9 h2  124.1 dd  -51.1 wDD  -57.4 shp 1.31 wMon  -37.6 beat 0%
+judge ranks (top10%)                     cagr   53.3 h1   21.5 h2   94.0 dd  -64.3 wDD  -81.9 shp 0.99 wMon  -39.7 beat 0%
+blend 50/50 (top10%)                     cagr   71.8 h1   38.5 h2  114.7 dd  -52.6 wDD  -59.5 shp 1.19 wMon  -40.0 beat 5%
+veto worst 20% (top10%)                  cagr   83.1 h1   50.4 h2  124.3 dd  -50.9 wDD  -56.5 shp 1.30 wMon  -37.6 beat 40%
+veto worst 40% (top10%)                  cagr   80.8 h1   46.3 h2  125.0 dd  -51.2 wDD  -56.9 shp 1.28 wMon  -37.5 beat 20%
+rerank top40 by judge                    cagr   77.8 h1   45.3 h2  118.9 dd  -51.7 wDD  -59.6 shp 1.23 wMon  -38.2 beat 30%
+blend 50/50 (rerank top40)               cagr   77.9 h1   42.4 h2  123.5 dd  -52.5 wDD  -58.2 shp 1.24 wMon  -37.8 beat 25%
+veto worst 30% of top40                  cagr   80.6 h1   45.8 h2  124.9 dd  -52.6 wDD  -56.9 shp 1.27 wMon  -38.9 beat 35%
+blend 50/50 (return model)               cagr   54.4 h1   30.4 h2   83.3 dd  -56.6 wDD  -63.7 shp 1.05 wMon  -39.4 beat 0%
+veto worst 30% (return model)            cagr   71.8 h1   49.7 h2   97.6 dd  -53.6 wDD  -61.8 shp 1.24 wMon  -38.4 beat 5%

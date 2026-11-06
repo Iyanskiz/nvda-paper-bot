@@ -1196,7 +1196,10 @@ def live_tick(p=PARAMS, out_dir=None):
             x["at"] = int(time.time())
             note(f"SELL {x['sym']}: {x['shares']:.2f} shares @ ${x['price']:,.2f}, profit "
                  f"{'+' if x['pnl'] >= 0 else '-'}${abs(x['pnl']):,.2f}. Why: {x['reason']}", "trade")
-        moved = park(book, prices, equity_of(book, prices), p)   # idle cash earns the T-bill rate
+        # idle cash earns the T-bill rate, but not while buys are still waiting to fill: parking it then means paying
+        # trading costs twice in minutes (Nov 6: $10,000 parked before the open, pulled back out at 9:30)
+        waiting_buys = any(o["side"] == "BUY" for o in book["pending"]) or book.get("pending_w")
+        moved = 0.0 if waiting_buys else park(book, prices, equity_of(book, prices), p)
         if moved:
             note(f"{'Parked' if moved > 0 else 'Took back'} ${abs(moved):,.2f} of idle cash "
                  f"{'in' if moved > 0 else 'from'} T-bills ({p['park']}): cash waiting for the next buy earns interest "

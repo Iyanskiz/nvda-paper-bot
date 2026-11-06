@@ -1,0 +1,27 @@
+440 backtests in 1091s
+
+== all_4y (mean of 20 timings)
+now                                      cagr  134.9 h1   89.4 h2  191.0 dd  -53.3 wDD  -59.4 shp 1.46 wMon  -44.9 beat 0%
+no borrowing                             cagr   75.7 h1   54.4 h2   99.3 dd  -30.7 wDD  -38.2 shp 1.55 wMon  -23.2 beat 0%
+no borrowing, 10 stocks                  cagr   69.8 h1   45.3 h2   97.8 dd  -27.9 wDD  -32.0 shp 1.56 wMon  -22.4 beat 0%
+no borrowing, 15 equal stocks            cagr   46.1 h1   27.8 h2   66.9 dd  -24.8 wDD  -31.7 shp 1.39 wMon  -21.6 beat 0%
+no borrowing, net 15%                    cagr   41.4 h1   35.3 h2   47.5 dd  -28.8 wDD  -50.4 shp 1.15 wMon  -16.7 beat 0%
+no borrowing, net 10%                    cagr   24.8 h1   20.4 h2   29.6 dd  -27.6 wDD  -51.3 shp 0.87 wMon  -13.9 beat 0%
+half stocks / half T-bills               cagr   35.8 h1   26.3 h2   45.6 dd  -16.5 wDD  -20.9 shp 1.54 wMon  -11.8 beat 0%
+no borrowing, T-bills in downtrend       cagr   71.8 h1   50.0 h2   95.9 dd  -30.8 wDD  -37.2 shp 1.50 wMon  -23.2 beat 0%
+defensive: 1.0 calm / 0.6 / 0.3          cagr   67.5 h1   43.8 h2   94.2 dd  -29.8 wDD  -33.9 shp 1.48 wMon  -23.2 beat 0%
+no borrowing + losing-streak brake       cagr   58.5 h1   42.1 h2   76.6 dd  -25.4 wDD  -27.9 shp 1.47 wMon  -18.8 beat 0%
+defensive + brake + 10 stocks + net 15%  cagr   29.0 h1   21.5 h2   36.9 dd  -17.8 wDD  -25.7 shp 1.16 wMon  -12.6 beat 0%
+
+== big600_9y (mean of 20 timings)
+now                                      cagr   83.2 h1   50.9 h2  124.1 dd  -51.1 wDD  -57.4 shp 1.31 wMon  -37.6 beat 0%
+no borrowing                             cagr   48.2 h1   33.1 h2   65.8 dd  -32.3 wDD  -36.6 shp 1.36 wMon  -19.7 beat 0%
+no borrowing, 10 stocks                  cagr   41.2 h1   28.7 h2   55.6 dd  -30.0 wDD  -34.2 shp 1.27 wMon  -19.6 beat 0%
+no borrowing, 15 equal stocks            cagr   30.3 h1   22.9 h2   38.9 dd  -26.4 wDD  -31.7 shp 1.16 wMon  -18.9 beat 0%
+no borrowing, net 15%                    cagr   25.0 h1   21.2 h2   29.6 dd  -30.7 wDD  -38.6 shp 0.98 wMon  -14.9 beat 0%
+no borrowing, net 10%                    cagr   24.1 h1   22.1 h2   26.6 dd  -27.8 wDD  -32.7 shp 1.09 wMon  -11.4 beat 0%
+half stocks / half T-bills               cagr   23.5 h1   16.7 h2   31.0 dd  -17.3 wDD  -19.7 shp 1.34 wMon  -10.1 beat 0%
+no borrowing, T-bills in downtrend       cagr   45.9 h1   32.6 h2   61.2 dd  -32.6 wDD  -37.9 shp 1.32 wMon  -19.7 beat 0%
+defensive: 1.0 calm / 0.6 / 0.3          cagr   43.7 h1   29.7 h2   59.5 dd  -27.0 wDD  -31.2 shp 1.35 wMon  -19.6 beat 0%
+no borrowing + losing-streak brake       cagr   36.9 h1   21.5 h2   54.8 dd  -29.2 wDD  -34.2 shp 1.23 wMon  -17.2 beat 0%
+defensive + brake + 10 stocks + net 15%  cagr   14.1 h1   10.6 h2   18.2 dd  -21.0 wDD  -24.9 shp 0.78 wMon  -11.6 beat 0%

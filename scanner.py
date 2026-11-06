@@ -42,9 +42,9 @@ PARAMS = dict(
     band=0.10,           # only resize a holding at a rebalance if it's 10%+ off its target (saves fees)
     phase=0,             # which week of the cycle it rebalances in
     leverage=1.25,       # while the S&P 500 trend is up, invest 1.25x the account (borrowing 25%); 1.0x when it's down
-    vol_lev=[[0.15, 2.0], [0.25, 1.5], [9.0, 1.0]],   # Iyan chose higher risk (Oct 27): 2x calm / 1.5x normal, the
-                         # best risk-adjusted of the aggressive round-10 settings; 2x is the most a broker allows overnight  # ...refined by how calm the market is: S&P 500 20-day volatility
-                         # under 15% -> 1.5x, 15-25% -> 1.25x, wilder -> no borrowing (beat flat 1.25x in 100% of timings)
+    vol_lev=[[9.0, 0.5]],  # Iyan, Nov 5: "only go up". Half the account in stocks, half in T-bills, always. Round 14:
+                         # worst drops -53% -> -17%, worst month -45% -> -12%, still 24-36%/yr (2x borrowing was 83-135%)
+    down_lev=0.5,        # same half-and-half when the S&P 500 trend is down
     margin_rate=0.06,    # yearly interest on borrowed money
     cooldown_days=90,    # after selling on a broken trend, move on: no rebuy for 90 days (free in tests; "forever" cost 2-4%/yr)
     mid_rank=3,          # between rebalances, a holding that drops out of the top n x 3 (21) is sold at the next open and its
@@ -545,7 +545,7 @@ def own_form(lev, equity_hist, p=PARAMS):
 def lev_for(regime, spy_vol, p=PARAMS):
     """How much of the account to invest: no borrowing in a downtrend, more in calm markets, less in wild ones."""
     if not regime:
-        return 1.0
+        return p.get("down_lev", 1.0)
     if p.get("vol_lev") and np.isfinite(spy_vol):
         return next(L for thr, L in p["vol_lev"] if spy_vol < thr)
     return p.get("leverage", 1.0)
@@ -794,6 +794,9 @@ def journal(book):
 
 
 RULES = [
+    dict(kept=True, rule="Safety first: half the account in stocks, half in T-bills, no borrowing (was up to 2x borrowing).",
+         source="Training round 14, Nov 5 2026 (440 backtests on the live engine), after the account fell 28% in a week at 2x",
+         evidence="Half stocks / half T-bills: all stocks 36%/yr, 600 biggest 24%/yr (S&P 500 about 15%), average worst drop -17% (was -53% / -51%), worst month -12% / -10% (was -45% / -38%). No setup avoided down months: even this one was down in 36-43% of months. Tighter safety nets (10%, 15%) made things worse, not safer: they sell on normal dips and miss the rebound. No borrowing at full size: 48-76%/yr with -31% drops (the next step up if more risk is wanted)."),
     dict(kept=True, rule="AI judge veto: a machine-learning model (LightGBM, 17 signals per stock, trained on about 200,000 past stock-months) rates every stock that passes the filters, and the bot won't buy or keep the 20% it rates worst.",
          source="Training round 13, Oct 29 2026 (400 backtests on the live engine, judge trained walk-forward so it never saw the future it was graded on)",
          evidence="Veto worst 20%: all stocks 135% to 136%/yr (ahead in 65% of timings), 600 biggest 83.2% to 83.1% (a tie), worst drops unchanged. Letting the judge pick the stocks itself collapsed returns (all stocks 135% to 7%/yr, worst drop -73%): it learned that wild stocks land in the top 10% most often, but they also crash most often. Blends of judge and trend score: 72-113%/yr, all worse. A bigger veto (40%) helped all stocks (+7) but hurt the 600 biggest (-2), so it was rejected."),
@@ -1120,7 +1123,9 @@ def live_tick(p=PARAMS, out_dir=None):
     actual = gross / eq_now if eq_now > 0 else 0.0
     target_note = (f"target {p['lev_now']:.2f}x (borrowing {p['lev_now'] - 1:.0%} at {p.get('margin_rate', 0.06):.0%} a year) "
                    f"because the trend is up and {mood}" if p["lev_now"] > 1 else
-                   "target 1.00x, no borrowing, because " + ("the market trend is down" if not st.get("regime") else mood))
+                   "target 1.00x, no borrowing, because " + ("the market trend is down" if not st.get("regime") else mood)
+                   if p["lev_now"] == 1 else
+                   f"target {p['lev_now']:.2f}x: {p['lev_now']:.0%} in stocks, the rest safe in T-bills, to keep drops small")
     st["risk"] = dict(exposure=round(actual, 3), target=p["lev_now"], spy_vol=st.get("spy_vol"),
                       note=f"Invested {actual:.2f}x the account now; {target_note}. New sizes apply at the next rebalance.")
     if st.get("last_target") is not None and st["last_target"] != p["lev_now"]:

@@ -147,6 +147,21 @@ ROUNDS["r13"] = {   # the AI judge (walk-forward LightGBM), every way it could s
     "blend 50/50 (return model)": dict(judge_src="ret", rank_by="blend"),
     "veto worst 30% (return model)": dict(judge_src="ret", judge_veto=0.3),
 }
+NB = [[9.0, 1.0]]
+DEF = [[0.15, 1.0], [0.25, 0.6], [9.0, 0.3]]
+ROUNDS["r14"] = {   # Iyan, Nov 5 after -28% in a week at 2x: the smallest drops that still beat the S&P 500
+    "now": {},
+    "no borrowing": dict(vol_lev=NB),
+    "no borrowing, 10 stocks": dict(vol_lev=NB, n=10),
+    "no borrowing, 15 equal stocks": dict(vol_lev=NB, n=15, weight="equal"),
+    "no borrowing, net 15%": dict(vol_lev=NB, trail_pct=0.15),
+    "no borrowing, net 10%": dict(vol_lev=NB, trail_pct=0.10),
+    "half stocks / half T-bills": dict(vol_lev=[[9.0, 0.5]], down_lev=0.5),
+    "no borrowing, T-bills in downtrend": dict(vol_lev=NB, down_lev=0.0),
+    "defensive: 1.0 calm / 0.6 / 0.3": dict(vol_lev=DEF, down_lev=0.3),
+    "no borrowing + losing-streak brake": dict(vol_lev=NB, eqc_ma=20, eqc_low=0.5),
+    "defensive + brake + 10 stocks + net 15%": dict(vol_lev=DEF, down_lev=0.3, eqc_ma=20, eqc_low=0.5, n=10, trail_pct=0.15),
+}
 ROUNDS["r10"] = {"now": {}}
 for lname, lad in LADDERS.items():
     for n in (5, 6, 7):
